@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "dev": "next dev --hostname 127.0.0.1",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
@@ -17,7 +17,8 @@
     "scan:secrets": "node scripts/scan-secrets.mjs",
     "chain:deploy": "cd chain && npx hardhat run scripts/deploy.ts --network localhost",
     "chain:deploy:testnet": "cd chain && npx hardhat run scripts/deploy.ts --network baseSepolia",
-    "chain:typecheck": "cd chain && npx tsc --noEmit"
+    "chain:typecheck": "cd chain && npx tsc --noEmit",
+    "dev:lan": "next dev --hostname 0.0.0.0"
   },
   "dependencies": {
     "next": "16.3.4",

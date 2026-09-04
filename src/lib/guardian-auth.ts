@@ -41,6 +41,41 @@ export function checkGuardian(request: Request): GuardCheck {
   return { ok: true };
 }
 
+/**
+ * 破壞性但要給畫面按的動作（一鍵重置）用的守衛。
+ *
+ * 兩條路任一條通過就放行：
+ *   1. **同源**：瀏覽器從我們自己的頁面按下去，會帶 Origin 而且對得上 Host
+ *   2. **帶 token**：操作者的腳本與現場的自動化走這條
+ *
+ * 擋掉的是第三種：同一個場館網路上的人直接 curl 過來。他沒有 Origin，
+ * 也沒有 token。這擋不住存心的人（Origin 是可以偽造的），但擋得住
+ * 掃描器與手滑 —— 而「demo 演到一半劇本被重置」多半是後者造成的。
+ *
+ * token 不能塞進頁面 HTML 讓前端帶：任何能開那一頁的人就都拿到 token 了，
+ * 那等於沒有 token。所以這裡走同源，不走「前端帶 token」。
+ */
+export function sameOriginOrToken(request: Request): GuardCheck {
+  const withToken = checkGuardian(request);
+  if (withToken.ok) return withToken;
+
+  const origin = request.headers.get('origin');
+  const host = request.headers.get('host');
+  if (origin && host) {
+    try {
+      if (new URL(origin).host === host) return { ok: true };
+    } catch {
+      // origin 不是合法 URL，當作沒帶
+    }
+  }
+
+  return {
+    ok: false,
+    status: 403,
+    error: '這個動作只接受本站頁面按下的請求，或帶 x-guardian-token 的呼叫',
+  };
+}
+
 function readToken(request: Request): string | undefined {
   const header = request.headers.get('x-guardian-token');
   if (header?.trim()) return header.trim();

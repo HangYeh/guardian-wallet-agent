@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { loadDemo } from '@/lib/demo';
 import { approvePayment, rejectPayment } from '@/lib/execute';
 import { checkGuardian } from '@/lib/guardian-auth';
+import { rateGuard } from '@/lib/rate-limit';
 import { state } from '@/lib/store';
 import { walletFor } from '@/lib/wallet';
 
@@ -19,6 +20,9 @@ export const dynamic = 'force-dynamic';
 type Body = { paymentId?: string; action?: 'approve' | 'reject' };
 
 export async function GET(request: Request) {
+  const limited = rateGuard(request, 'guardian');
+  if (limited) return limited;
+
   const guard = checkGuardian(request);
   if (!guard.ok) {
     return NextResponse.json({ ok: false, error: guard.error }, { status: guard.status });
@@ -29,6 +33,10 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
+  // 限流放在驗證之前：猜 token 的人不該有無限次機會。
+  const limited = rateGuard(request, 'guardian');
+  if (limited) return limited;
+
   const guard = checkGuardian(request);
   if (!guard.ok) {
     return NextResponse.json({ ok: false, error: guard.error }, { status: guard.status });

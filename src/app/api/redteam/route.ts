@@ -1,4 +1,6 @@
 import { NextResponse } from 'next/server';
+import { checkGuardian } from '@/lib/guardian-auth';
+import { rateGuard } from '@/lib/rate-limit';
 import { assetNetworkFor, currentChainMode } from '@/lib/intent';
 import { loadDemo } from '@/lib/demo';
 import { write } from '@/lib/execute';
@@ -17,9 +19,13 @@ export const dynamic = 'force-dynamic';
  * 答案是四句 revert。這就是「政策寫在合約裡」跟「政策寫在應用層」的差別，
  * 而且它是演出來的，不是講出來的。
  *
- * 預設關閉（`ENABLE_REDTEAM` 不是 'true' 就回 404），因為這支端點的存在本身
- * 就是一個攻擊面 —— 它會用 operator 的金鑰送出真的交易。
- * demo 前才打開，錄影結束就關掉。
+ * **兩道守衛，因為這支端點會用 operator 的金鑰送出真的交易：**
+ *   1. 預設關閉 —— `ENABLE_REDTEAM` 不是 'true' 就回 404（連存在都不承認）
+ *   2. 就算打開，也要帶 `GUARDIAN_TOKEN`
+ *
+ * 只有第一道是不夠的：舞台上一定會把旗標打開，而那時候同一個場館網路上的
+ * 任何人都打得到它。燒的是測試網 gas 不多，但那是我們的 operator 金鑰在簽名，
+ * 而「誰能讓我們的金鑰簽東西」這件事不該只由一個環境變數決定。
  */
 
 type Attack = 'not_allowlisted' | 'over_cap' | 'replay' | 'expired';
@@ -35,8 +41,17 @@ function enabled(): boolean {
   return process.env.ENABLE_REDTEAM === 'true';
 }
 
-export async function GET() {
+export async function GET(request: Request) {
   if (!enabled()) return new NextResponse(null, { status: 404 });
+
+  const limited = rateGuard(request, 'redteam');
+  if (limited) return limited;
+
+  const guard = checkGuardian(request);
+  if (!guard.ok) {
+    return NextResponse.json({ ok: false, error: guard.error }, { status: guard.status });
+  }
+
   return NextResponse.json({
     ok: true,
     chainMode: currentChainMode(),
@@ -46,6 +61,14 @@ export async function GET() {
 
 export async function POST(request: Request) {
   if (!enabled()) return new NextResponse(null, { status: 404 });
+
+  const limited = rateGuard(request, 'redteam');
+  if (limited) return limited;
+
+  const guard = checkGuardian(request);
+  if (!guard.ok) {
+    return NextResponse.json({ ok: false, error: guard.error }, { status: guard.status });
+  }
 
   let body: { attack?: Attack };
   try {

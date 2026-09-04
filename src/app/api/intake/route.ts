@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { NextResponse } from 'next/server';
 import { newRunId, publish } from '@/lib/bus';
+import { rateGuard } from '@/lib/rate-limit';
 import { loadDemo } from '@/lib/demo';
 import { executeIntent, write } from '@/lib/execute';
 import { walletFor } from '@/lib/wallet';
@@ -68,6 +69,11 @@ const TASK_ID_PATTERN = /^[\w.:-]{1,80}$/;
 type Resolved = { text: string; source: IntentSource } | { image: string; source: IntentSource };
 
 export async function POST(request: Request) {
+  // 每一發都是一次真的模型呼叫，燒的是作者自己的額度。這道守衛擋的是
+  // 寫錯的重試迴圈，以及同一個場館網路上的好奇心。
+  const limited = rateGuard(request, 'intake');
+  if (limited) return limited;
+
   let body: IntakeBody;
   try {
     body = (await request.json()) as IntakeBody;
@@ -78,6 +84,9 @@ export async function POST(request: Request) {
 }
 
 export async function GET(request: Request) {
+  const limited = rateGuard(request, 'intake');
+  if (limited) return limited;
+
   const q = new URL(request.url).searchParams;
   return intake({
     text: q.get('text') ?? undefined,

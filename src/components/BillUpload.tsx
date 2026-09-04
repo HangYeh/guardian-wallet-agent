@@ -31,6 +31,18 @@ type Intent = {
   amount: number;
 };
 
+type Decision = { action: 'auto' | 'hold' | 'block'; rulesHit: string[]; reason: string };
+
+type Payment = {
+  id: string;
+  status: string;
+  amount: number;
+  channel: string;
+  txHash?: string;
+  explorerUrl?: string;
+  revertReason?: string;
+};
+
 type TraceStep = { phase: string; tool?: string; detail: string };
 
 type Result = {
@@ -42,6 +54,8 @@ type Result = {
   fields?: Fields;
   transcript?: string;
   intent?: Intent;
+  decision?: Decision;
+  payment?: Payment;
   payee?: { id: string; name: string; allowlisted: boolean; address: string } | null;
   trace?: TraceStep[];
   warnings?: string[];
@@ -54,6 +68,16 @@ const PHASE_COLOR: Record<string, string> = {
   plan: 'var(--color-ochre)',
   tool: 'var(--color-celadon)',
   verify: 'var(--color-cinnabar)',
+};
+
+/**
+ * 三種決策的樣子。阿嬤看的是這一塊，所以用字要像人講話，
+ * 而且要大 —— 這一格的字級是整頁最大的。
+ */
+const DECISION_LOOK: Record<Decision['action'], { title: string; color: string; icon: string }> = {
+  auto: { title: '門神幫妳繳好了', color: 'var(--color-celadon)', icon: '✓' },
+  hold: { title: '這筆要等家人點頭', color: 'var(--color-ochre)', icon: '⏸' },
+  block: { title: '門神把這筆擋下來了', color: 'var(--color-cinnabar)', icon: '✕' },
 };
 
 const CATEGORY_LABEL: Record<string, string> = {
@@ -183,6 +207,67 @@ export default function BillUpload() {
           )}
 
           <div className="flex flex-col gap-4">
+            {/* ---- 門神做了什麼：整頁最重要的一塊 ---- */}
+            {result.decision && (
+              <div
+                className="card p-5"
+                style={{ borderLeft: `6px solid ${DECISION_LOOK[result.decision.action].color}` }}
+              >
+                <div className="flex items-baseline gap-3">
+                  <span
+                    className="text-[2rem] leading-none"
+                    style={{ color: DECISION_LOOK[result.decision.action].color }}
+                    aria-hidden="true"
+                  >
+                    {DECISION_LOOK[result.decision.action].icon}
+                  </span>
+                  <span className="text-[1.6rem] font-bold">
+                    {DECISION_LOOK[result.decision.action].title}
+                  </span>
+                </div>
+
+                <p className="mt-2 max-w-[52ch] text-[1rem] leading-relaxed">
+                  {result.decision.reason}
+                </p>
+
+                {result.payment && (
+                  <div className="mt-3 flex flex-wrap items-baseline gap-x-5 gap-y-1 text-[0.82rem] text-[var(--color-ink-2)]">
+                    <span>
+                      實付{' '}
+                      <b className="mono">{result.payment.amount.toLocaleString('zh-TW')}</b> 元
+                    </span>
+                    <span className="mono">{result.payment.channel}</span>
+                    {result.payment.txHash && (
+                      <span className="mono" title={result.payment.txHash}>
+                        {result.payment.explorerUrl ? (
+                          <a href={result.payment.explorerUrl} target="_blank" rel="noreferrer">
+                            {result.payment.txHash.slice(0, 16)}…
+                          </a>
+                        ) : (
+                          <>{result.payment.txHash.slice(0, 16)}…</>
+                        )}
+                      </span>
+                    )}
+                    {result.payment.revertReason && (
+                      <span style={{ color: 'var(--color-cinnabar)' }}>
+                        {result.payment.revertReason}
+                      </span>
+                    )}
+                  </div>
+                )}
+
+                {result.decision.rulesHit.length > 0 && (
+                  <div className="mt-3 flex flex-wrap gap-1.5">
+                    {result.decision.rulesHit.map((r) => (
+                      <span key={r} className="pill mono text-[0.7rem]">
+                        {r}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* ---- 讀到什麼 ---- */}
             <div className="card p-5">
               <div className="flex items-baseline justify-between gap-3">

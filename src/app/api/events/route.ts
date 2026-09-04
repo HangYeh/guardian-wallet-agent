@@ -1,4 +1,5 @@
 import { backlog, busStats, subscribe, type BusEvent } from '@/lib/bus';
+import { rateGuard } from '@/lib/rate-limit';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -17,6 +18,10 @@ export const runtime = 'nodejs';
 const HEARTBEAT_MS = 15_000;
 
 export async function GET(request: Request) {
+  // 訂閱數本身有上限；這裡防的是反覆連斷把緩衝與訂閱表洗一遍。
+  const limited = rateGuard(request, 'events');
+  if (limited) return limited;
+
   const url = new URL(request.url);
   const header = request.headers.get('last-event-id');
   const since = Number(header ?? url.searchParams.get('since') ?? '0');

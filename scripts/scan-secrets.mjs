@@ -26,6 +26,10 @@ const RULES = [
     re: /(?:PRIVATE_KEY|privateKey|PRIVKEY|privkey)\s*[=:]\s*["']?0x[0-9a-fA-F]{64}/g,
   },
   { name: '助記詞', re: /(?:MNEMONIC|mnemonic)\s*[=:]\s*["'][a-z]+(?: [a-z]+){11,23}["']/g },
+  // 環境檔裡整行就是一把私鑰的寫法（沒有 PRIVATE_KEY 這種變數名也要抓到）。
+  // 刻意不寫「任何 0x + 64 hex」那種規則：我們自己的冪等鍵與 memoHash 就長那樣，
+  // 那樣寫會每次都誤報，然後大家開始忽略這支掃描器 —— 那才是真正的風險。
+  { name: '獨立成行的私鑰', re: /^[ \t]*(?:0x)?[0-9a-fA-F]{64}[ \t]*$/gm },
 ];
 
 /** 已知安全、刻意公開的字串。加東西進來要寫清楚為什麼。 */
@@ -33,6 +37,12 @@ const ALLOWED = [
   // Hardhat 的標準測試助記詞，全世界都一樣，本來就該公開
   /test test test test test test test test test test test junk/,
 ];
+
+/**
+ * 進了版控就是問題的檔名，不管裡面寫什麼。
+ * .env.example 是刻意要進版控的樣板，所以排除掉。
+ */
+const FORBIDDEN_FILES = /(^|[/])[.]env($|[.](?!example))/;
 
 const SKIP_PATHS = /(^|\/)(node_modules|\.next|artifacts|cache|typechain-types)\//;
 const BINARY_EXT = /\.(png|jpe?g|gif|webp|ico|pdf|mp4|mov|woff2?|ttf|zip)$/i;
@@ -66,6 +76,10 @@ const files = git(['ls-files']).split('\n').filter(Boolean);
 let scanned = 0;
 for (const f of files) {
   if (SKIP_PATHS.test(f) || BINARY_EXT.test(f)) continue;
+  if (FORBIDDEN_FILES.test(f)) {
+    hits.push({ rule: '環境檔進了版控', where: f, line: 1, sample: '整個檔案' });
+    continue;
+  }
   try {
     if (statSync(f).size > MAX_BYTES) continue;
     scan(readFileSync(f, 'utf8'), f, hits);
