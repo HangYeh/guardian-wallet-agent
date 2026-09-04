@@ -147,3 +147,34 @@ table.grid th.num {
     animation: none !important;
   }
 }
+
+/* 阿嬤按得到的按鈕：手指大小、對比夠、狀態明確。
+   72 歲的使用者不該需要瞄準。 */
+.btn-primary,
+.btn-quiet {
+  font-family: var(--font-sans);
+  font-size: 1.05rem;
+  font-weight: 700;
+  padding: 0.7rem 1.4rem;
+  border: 2px solid var(--color-cinnabar);
+  cursor: pointer;
+  transition: background-color 0.12s ease, color 0.12s ease;
+}
+.btn-primary {
+  background: var(--color-cinnabar);
+  color: var(--color-surface);
+}
+.btn-quiet {
+  background: transparent;
+  color: var(--color-cinnabar);
+  font-size: 0.95rem;
+  font-weight: 500;
+  padding: 0.7rem 1.1rem;
+  border-color: var(--color-line);
+}
+.btn-primary:hover:not(:disabled) { background: var(--color-ink); border-color: var(--color-ink); }
+.btn-quiet:hover:not(:disabled) { border-color: var(--color-cinnabar); }
+.btn-primary:disabled,
+.btn-quiet:disabled { opacity: 0.45; cursor: wait; }
+.btn-primary:focus-visible,
+.btn-quiet:focus-visible { outline: 3px solid var(--color-ochre); outline-offset: 2px; }

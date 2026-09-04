@@ -1,9 +1,9 @@
+import BillUpload from '@/components/BillUpload';
 import { loadDemo, formatTWD } from '@/lib/demo';
 
 export const dynamic = 'force-dynamic';
 
-const BUTTONS = [
-  { icon: '📄', label: '拍帳單', hint: '拍照或選一張圖，門神幫妳看', cell: 'M1.2' },
+const PENDING_BUTTONS = [
   { icon: '🛡️', label: '這是詐騙嗎？', hint: '把可疑訊息貼進來', cell: 'M4.3' },
   { icon: '🔊', label: '叫門神唸給我聽', hint: '這個月的錢花到哪裡', cell: 'M5.3' },
 ];
@@ -21,8 +21,10 @@ export default function ElderPage() {
         拿不準的事情它會先問{demo.persona.guardian.name}。
       </p>
 
-      <div className="grid gap-3 sm:grid-cols-3">
-        {BUTTONS.map((b) => (
+      <BillUpload />
+
+      <div className="mt-6 grid gap-3 sm:grid-cols-2">
+        {PENDING_BUTTONS.map((b) => (
           <button
             key={b.label}
             type="button"
@@ -97,8 +99,8 @@ export default function ElderPage() {
       </div>
 
       <div className="todo mt-6">
-        三顆按鈕還沒接上功能。拍帳單走 M1.2 的視覺解析，詐騙判斷走 M4.3，語音走 M5.3。
-        現在畫面上的數字全部讀自 <span className="mono">demo-data/guardian-demo.json</span>。
+        拍帳單已經接上視覺解析（M1.2）。詐騙判斷走 M4.3，語音走 M5.3。
+        下面的數字全部讀自 <span className="mono">demo-data/guardian-demo.json</span>。
       </div>
     </main>
   );

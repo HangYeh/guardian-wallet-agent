@@ -45,10 +45,20 @@ export function activeModel(): string {
   return process.env.OPENAI_MODEL ?? DEFAULT_MODEL;
 }
 
+/**
+ * 視覺解析開關。關掉之後上傳圖片會退回文字路徑，功能退化但不會壞。
+ * 圖片是比文字更危險的注入面（可以把指令印在帳單上），所以它是獨立的旗標。
+ */
+export function visionEnabled(): boolean {
+  return llmEnabled() && process.env.ENABLE_VISION === 'true';
+}
+
 /** 呼叫模型並要求它回傳符合 schema 的 JSON。失敗一律丟 `LlmError`，由呼叫端決定備援。 */
 export async function completeJson<T>(args: {
   system: string;
   user: string;
+  /** 一或多張圖，格式為 data URL。給了就走視覺模式。 */
+  images?: string[];
   schema: JsonSchemaSpec;
   model?: string;
   timeoutMs?: number;
@@ -74,7 +84,18 @@ export async function completeJson<T>(args: {
         max_completion_tokens: args.maxTokens ?? 800,
         messages: [
           { role: 'system', content: args.system },
-          { role: 'user', content: args.user },
+          {
+            role: 'user',
+            content: args.images?.length
+              ? [
+                  { type: 'text', text: args.user },
+                  ...args.images.map((url) => ({
+                    type: 'image_url',
+                    image_url: { url, detail: 'high' },
+                  })),
+                ]
+              : args.user,
+          },
         ],
         response_format: {
           type: 'json_schema',

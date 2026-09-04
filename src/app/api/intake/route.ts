@@ -3,7 +3,8 @@ import { join } from 'node:path';
 import { NextResponse } from 'next/server';
 import { loadDemo } from '@/lib/demo';
 import { buildIntent, currentChainMode, intentToTransaction } from '@/lib/intent';
-import { matchPayee, parseText } from '@/lib/parser';
+import { visionEnabled } from '@/lib/llm';
+import { matchPayee, parseImage, parseText, type ParseResult } from '@/lib/parser';
 import { state } from '@/lib/store';
 import type { AuditEvent, IntentSource, TraceStep } from '@/lib/types';
 
@@ -12,21 +13,23 @@ export const dynamic = 'force-dynamic';
 /**
  * POST /api/intake
  *
- * 門神的入口。一段文字進來，出去的是一個受管的授權信封。
+ * 門神的入口。一段文字或一張圖進來，出去的是一個受管的授權信封。
  * 這條路徑上模型只做一件事：讀。要不要付、付多少、付給誰的地址，
  * 全部由 `buildIntent` 依政策決定，模型碰不到。
  *
- * body 四選一：
- *   { "text": "..." }              直接給原文
- *   { "messageId": "m_redpacket" } 用劇本裡的訊息
+ * body 五選一：
+ *   { "text": "..." }               直接給原文
+ *   { "image": "data:image/png;base64,..." }  拍下來的帳單
+ *   { "messageId": "m_redpacket" }  用劇本裡的訊息
  *   { "scenarioId": "electricity" } 用劇本裡的一幕
- *   { "billId": "b002" }           用待繳帳單
+ *   { "billId": "b002" }            用待繳帳單
  *
  * GET /api/intake?scenario=electricity 是同一件事，方便現場用瀏覽器驗。
  */
 
 type IntakeBody = {
   text?: string;
+  image?: string;
   messageId?: string;
   scenarioId?: string;
   billId?: string;
@@ -40,8 +43,15 @@ type IntakeBody = {
  */
 const MAX_INPUT_CHARS = 4000;
 
+/** 圖片上限（base64 字串長度，約等於 3 MB 原始檔）。手機拍的帳單遠低於這個數字。 */
+const MAX_IMAGE_CHARS = 4_000_000;
+
+const IMAGE_DATA_URL = /^data:image\/(png|jpeg|jpg|webp);base64,[A-Za-z0-9+/=\s]+$/;
+
 /** 呼叫端自訂的任務代號會進到冪等鍵，所以字元集與長度都要限制。 */
 const TASK_ID_PATTERN = /^[\w.:-]{1,80}$/;
+
+type Resolved = { text: string; source: IntentSource } | { image: string; source: IntentSource };
 
 export async function POST(request: Request) {
   let body: IntakeBody;
@@ -66,7 +76,7 @@ export async function GET(request: Request) {
 async function intake(body: IntakeBody) {
   const demo = loadDemo();
 
-  let resolved: { text: string; source: IntentSource } | { error: string };
+  let resolved: Resolved | { error: string };
   try {
     resolved = resolveInput(body);
   } catch (err) {
@@ -79,27 +89,48 @@ async function intake(body: IntakeBody) {
     return NextResponse.json({ ok: false, error: resolved.error }, { status: 400 });
   }
 
-  const { text, source } = resolved;
+  const image = 'image' in resolved ? resolved.image : undefined;
+  const inputText = 'text' in resolved ? resolved.text : undefined;
+  const isImage = image !== undefined;
+  const source = resolved.source;
+
   const trace: TraceStep[] = [];
   const step = (phase: TraceStep['phase'], detail: string, tool?: string) =>
     trace.push({ t: new Date().toISOString(), phase, tool, detail });
 
-  step('observe', `收到 ${source} 輸入，共 ${text.length} 字`);
+  step(
+    'observe',
+    image
+      ? `收到一張圖，約 ${Math.round(image.length / 1365)} KB`
+      : `收到 ${source} 輸入，共 ${inputText!.length} 字`,
+  );
 
-  const parsed = await parseText(text, demo.payees);
+  const parsed: ParseResult = image
+    ? await parseImage(image)
+    : await parseText(inputText!, demo.payees);
+
   step(
     'plan',
     parsed.engine === 'llm'
-      ? `${parsed.model} 抽取七個欄位，temperature 0、strict schema，耗時 ${parsed.latencyMs} 毫秒`
-      : `模型未使用（${parsed.fallbackReason}），改走規則解析`,
-    'parseText',
+      ? parsed.cached
+        ? `同一份輸入先前已解析過，直接用快取結果（${parsed.model}），沒有再呼叫模型`
+        : `${parsed.model} ${isImage ? '讀圖' : '讀文字'}抽取欄位，temperature 0、strict schema，耗時 ${parsed.latencyMs} 毫秒`
+      : `模型未使用（${parsed.fallbackReason}），${isImage ? '圖片讀不到內容' : '改走規則解析'}`,
+    isImage ? 'parseImage' : 'parseText',
   );
 
+  // 之後所有以文字為基礎的檢查都跑在這一段上。圖片的話就是模型讀出來的逐字稿，
+  // 因為指令可以印在帳單上，逐字稿必須進入風險分析，不能只留欄位。
+  const rawText = isImage ? (parsed.transcript ?? '') : inputText!;
+
   const f = parsed.fields;
+  if (isImage && parsed.transcript) {
+    step('tool', `逐字讀到 ${parsed.transcript.length} 字，全文進入後續風險分析`, 'parseImage');
+  }
   step(
     'tool',
     `抽出 ${f.payeeName}｜${f.amount} 元｜到期 ${f.dueDate ?? '未寫'}｜把握度 ${f.confidence.toFixed(2)}`,
-    'parseText',
+    isImage ? 'parseImage' : 'parseText',
   );
 
   const payee = matchPayee(demo.payees, f.payeeName, f.category);
@@ -113,7 +144,7 @@ async function intake(body: IntakeBody) {
 
   const intent = buildIntent({
     draft: f,
-    rawText: text,
+    rawText,
     source,
     policy: demo.policy,
     payee,
@@ -126,7 +157,14 @@ async function intake(body: IntakeBody) {
   );
 
   const warnings: string[] = [];
-  if (parsed.engine === 'rules') warnings.push('這次是規則解析，不是模型解析，欄位可能不完整');
+  if (parsed.engine === 'rules' && isImage) {
+    warnings.push(`圖片沒有解析成功：${parsed.fallbackReason}`);
+  } else if (parsed.engine === 'rules') {
+    warnings.push('這次是規則解析，不是模型解析，欄位可能不完整');
+  } else if (parsed.fallbackReason) {
+    // 欄位讀到了但逐字稿沒讀到：畫面照常，但要說清楚風險分析少了一份材料
+    warnings.push(parsed.fallbackReason);
+  }
   if (!payee) warnings.push('收款人不在名單內');
   if (intent.amount > demo.policy.perTxCap) {
     warnings.push(
@@ -143,8 +181,10 @@ async function intake(body: IntakeBody) {
       type: 'intent.received',
       actor: 'elder',
       intentId: intent.id,
-      summary: `收到一則${source === 'text' ? '文字' : source}輸入，共 ${text.length} 字`,
-      details: { source, chars: text.length },
+      summary: isImage
+        ? '收到一張帳單照片'
+        : `收到一則${source === 'text' ? '文字' : source}輸入，共 ${rawText.length} 字`,
+      details: { source, chars: rawText.length },
     }),
     auditEvent({
       type: 'intent.parsed',
@@ -172,6 +212,7 @@ async function intake(body: IntakeBody) {
     fallbackReason: parsed.fallbackReason,
     chainMode: currentChainMode(),
     fields: f,
+    transcript: parsed.transcript,
     intent,
     payee: payee ?? null,
     transaction: intentToTransaction(intent, payee),
@@ -180,11 +221,21 @@ async function intake(body: IntakeBody) {
   });
 }
 
-function resolveInput(body: IntakeBody): { text: string; source: IntentSource } | { error: string } {
+function resolveInput(body: IntakeBody): Resolved | { error: string } {
   const demo = loadDemo();
 
   if (body.taskId && !TASK_ID_PATTERN.test(body.taskId)) {
     return { error: 'taskId 只能是 80 字元以內的英數與 . : - _' };
+  }
+
+  if (body.image) {
+    if (body.image.length > MAX_IMAGE_CHARS) {
+      return { error: `圖片太大（約 ${Math.round(body.image.length / 1365)} KB），上限約 3 MB` };
+    }
+    if (!IMAGE_DATA_URL.test(body.image)) {
+      return { error: '圖片要是 data:image/(png|jpeg|webp);base64 格式' };
+    }
+    return { image: body.image, source: 'image' };
   }
 
   if (body.text?.trim()) {
@@ -220,18 +271,35 @@ function resolveInput(body: IntakeBody): { text: string; source: IntentSource } 
       return { text: m.text, source: 'message' };
     }
 
-    // 圖片情境在 M1.1 先讀同名的文字版；真正的視覺解析在 M1.2 接上。
-    const txt = sc.input.value.replace(/\.(png|jpg|jpeg|webp)$/i, '.txt');
-    return { text: readDemoFile(txt), source: 'text' };
+    // 圖片情境：視覺模式開著就真的看圖；關著就讀同名的文字版。
+    // 這條降級路徑就是 fixtures 模式在現場網路壞掉時要走的。
+    if (visionEnabled()) {
+      return { image: readDemoImage(sc.input.value), source: 'image' };
+    }
+    return {
+      text: readDemoText(sc.input.value.replace(/\.(png|jpe?g|webp)$/i, '.txt')),
+      source: 'text',
+    };
   }
 
-  return { error: '要給 text、messageId、scenarioId 或 billId 其中一個' };
+  return { error: '要給 text、image、messageId、scenarioId 或 billId 其中一個' };
 }
 
-function readDemoFile(name: string): string {
-  // 檔名目前只來自我們自己 commit 進去的劇本，但讀檔的參數就是該擋，不看來源。
-  if (!/^[\w-]+\.[a-z]{2,4}$/.test(name)) throw new Error(`不合法的劇本檔名：${name}`);
-  return readFileSync(join(process.cwd(), 'demo-data', name), 'utf8');
+// 檔名目前只來自我們自己 commit 進去的劇本，但讀檔的參數就是該擋，不看來源。
+function demoPath(name: string, pattern: RegExp): string {
+  if (!pattern.test(name)) throw new Error(`不合法的劇本檔名：${name}`);
+  return join(process.cwd(), 'demo-data', name);
+}
+
+function readDemoText(name: string): string {
+  return readFileSync(demoPath(name, /^[\w-]+\.txt$/), 'utf8');
+}
+
+function readDemoImage(name: string): string {
+  const path = demoPath(name, /^[\w-]+\.(png|jpe?g|webp)$/i);
+  const ext = name.split('.').pop()!.toLowerCase();
+  const mime = ext === 'png' ? 'image/png' : ext === 'webp' ? 'image/webp' : 'image/jpeg';
+  return `data:${mime};base64,${readFileSync(path).toString('base64')}`;
 }
 
 function auditEvent(e: Omit<AuditEvent, 'id' | 'ts'>): AuditEvent {
