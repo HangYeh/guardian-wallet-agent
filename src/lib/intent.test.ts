@@ -1,11 +1,21 @@
 import { describe, expect, it } from 'vitest';
-import { buildIdempotencyKey, intentExpiry, isIntentExpired, INTENT_TTL_MS } from '@/lib/intent';
+import {
+  assetNetworkFor,
+  buildIdempotencyKey,
+  buildIntent,
+  deriveTaskId,
+  intentExpiry,
+  intentToTransaction,
+  isIntentExpired,
+  INTENT_TTL_MS,
+} from '@/lib/intent';
+import type { Payee, Policy } from '@/lib/types';
 
 const base = {
   taskId: 'bill-2026-09-taipower',
   merchant: '台灣電力公司',
   amount: 1280,
-  expiresAt: '2026-09-04T13:15:00.000Z',
+  assetNetwork: 'tTWD@eip155:31337',
 };
 
 describe('buildIdempotencyKey', () => {
@@ -13,7 +23,7 @@ describe('buildIdempotencyKey', () => {
     expect(buildIdempotencyKey(base)).toMatch(/^0x[0-9a-f]{64}$/);
   });
 
-  it('同樣的 intent 得到同一把鍵（逾時重試不會變成第二筆付款）', () => {
+  it('同一個任務永遠是同一把鍵', () => {
     expect(buildIdempotencyKey(base)).toBe(buildIdempotencyKey({ ...base }));
   });
 
@@ -23,6 +33,12 @@ describe('buildIdempotencyKey', () => {
 
   it('收款人不同就是不同的鍵', () => {
     expect(buildIdempotencyKey({ ...base, merchant: '詐騙帳戶' })).not.toBe(
+      buildIdempotencyKey(base),
+    );
+  });
+
+  it('換一條鏈就是不同的鍵，同一份授權不能跨鏈再結算一次', () => {
+    expect(buildIdempotencyKey({ ...base, assetNetwork: 'tTWD@eip155:84532' })).not.toBe(
       buildIdempotencyKey(base),
     );
   });
@@ -39,5 +55,137 @@ describe('intent 效期', () => {
     const intent = { expiresAt: '2026-09-04T13:15:00.000Z' };
     expect(isIntentExpired(intent, new Date('2026-09-04T13:14:59.000Z'))).toBe(false);
     expect(isIntentExpired(intent, new Date('2026-09-04T13:15:01.000Z'))).toBe(true);
+  });
+});
+
+describe('deriveTaskId', () => {
+  it('同一期帳單永遠是同一個任務', () => {
+    const a = deriveTaskId({ kind: 'bill', slug: 'taipower', period: '2026-09', rawText: '第一次掃描' });
+    const b = deriveTaskId({ kind: 'bill', slug: 'taipower', period: '2026-09', rawText: '第二次掃描，字不一樣' });
+    expect(a).toBe('bill-2026-09-taipower');
+    expect(b).toBe(a);
+  });
+
+  it('不同帳期是不同的任務', () => {
+    expect(deriveTaskId({ kind: 'bill', slug: 'taipower', period: '2026-10', rawText: '' })).not.toBe(
+      deriveTaskId({ kind: 'bill', slug: 'taipower', period: '2026-09', rawText: '' }),
+    );
+  });
+
+  it('轉帳把原文雜湊帶進任務代號，同一則請求重試多少次都是同一個任務', () => {
+    const text = '幫我轉三千給孫子小宇當生日紅包';
+    const a = deriveTaskId({ kind: 'transfer', slug: 'xiaoyu', period: '2026-09', rawText: text });
+    const b = deriveTaskId({ kind: 'transfer', slug: 'xiaoyu', period: '2026-09', rawText: text });
+    expect(a).toBe(b);
+    expect(a).toMatch(/^transfer-2026-09-xiaoyu-[0-9a-f]{6}$/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 授權信封
+// ---------------------------------------------------------------------------
+
+const policy: Policy = {
+  perTxCap: 3000,
+  dailyCap: 5000,
+  approvalThreshold: 2000,
+  newPayeeRequiresApproval: true,
+  newPayeeCooldownHours: 24,
+  quietHours: [22, 7],
+  allowlist: ['payee_taipower'],
+};
+
+const taipower: Payee = {
+  id: 'payee_taipower',
+  name: '台灣電力公司',
+  address: '0x1111111111111111111111111111111111111111',
+  kind: 'utility',
+  allowlisted: true,
+  typicalAmount: 1380,
+};
+
+const billDraft = {
+  kind: 'bill' as const,
+  payeeName: '台灣電力公司',
+  amount: 1280,
+  dueDate: '2026-09-20',
+  category: 'utility',
+  confidence: 0.95,
+};
+
+const now = new Date('2026-09-04T05:00:00.000Z'); // 台北 13:00
+
+function build(overrides: Partial<Parameters<typeof buildIntent>[0]> = {}) {
+  return buildIntent({
+    draft: billDraft,
+    rawText: '台灣電力公司 本期應繳金額 NT$1,280 繳費期限 2026/09/20',
+    source: 'text',
+    policy,
+    payee: taipower,
+    now,
+    chainMode: 'local',
+    ...overrides,
+  });
+}
+
+describe('buildIntent 六個受管欄位', () => {
+  it('六個欄位都填好了，帳期從繳費期限推出來', () => {
+    const i = build();
+    expect(i.taskId).toBe('bill-2026-09-taipower');
+    expect(i.resource).toBe('台灣電力公司 2026-09 帳單');
+    expect(i.merchant).toBe('台灣電力公司');
+    expect(i.maxAmount).toBe(1280);
+    expect(i.assetNetwork).toBe('tTWD@eip155:31337');
+    expect(i.expiresAt).toBe('2026-09-04T05:15:00.000Z');
+    expect(i.idempotencyKey).toMatch(/^0x[0-9a-f]{64}$/);
+  });
+
+  it('授權上限永遠不會超過守護者設的單筆上限', () => {
+    const scam = build({
+      draft: { ...billDraft, amount: 50_000, payeeName: '監管帳戶' },
+      payee: undefined,
+    });
+    expect(scam.amount).toBe(50_000); // 對方要的
+    expect(scam.maxAmount).toBe(3000); // 我們敢授權的
+  });
+
+  it('逾時重試拿到同一把鍵：逾時不等於可以再付一次', () => {
+    const first = build();
+    const retry = build({ now: new Date('2026-09-04T05:30:00.000Z') }); // 效期已過才重試
+    expect(retry.expiresAt).not.toBe(first.expiresAt);
+    expect(retry.idempotencyKey).toBe(first.idempotencyKey);
+    expect(retry.id).toBe(first.id);
+  });
+
+  it('測試網與本地鏈的信封不通用', () => {
+    expect(build({ chainMode: 'testnet' }).idempotencyKey).not.toBe(build().idempotencyKey);
+  });
+
+  it('沒有繳費期限就用當天的台北日期當帳期', () => {
+    const i = build({ draft: { ...billDraft, dueDate: null } });
+    expect(i.taskId).toBe('bill-2026-09-taipower');
+    expect(i.dueDate).toBeUndefined();
+  });
+});
+
+describe('intentToTransaction', () => {
+  it('把意圖投影成帳本上的一筆，水電視為固定支出', () => {
+    const tx = intentToTransaction(build(), taipower);
+    expect(tx).toMatchObject({
+      date: '2026-09-20',
+      merchant: '台灣電力公司',
+      amount: 1280,
+      category: 'utility',
+      recurring: true,
+      source: 'text',
+    });
+  });
+});
+
+describe('assetNetworkFor', () => {
+  it('測試網是 Base Sepolia，其餘走本地鏈', () => {
+    expect(assetNetworkFor('testnet')).toBe('tTWD@eip155:84532');
+    expect(assetNetworkFor('local')).toBe('tTWD@eip155:31337');
+    expect(assetNetworkFor('mock')).toBe('tTWD@eip155:31337');
   });
 });

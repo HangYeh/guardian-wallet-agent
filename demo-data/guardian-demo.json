@@ -36,7 +36,13 @@
       "accountIndex": 5,
       "kind": "utility",
       "allowlisted": true,
-      "typicalAmount": 1380
+      "typicalAmount": 1380,
+      "aliases": [
+        "台電",
+        "台灣電力",
+        "電費",
+        "電力公司"
+      ]
     },
     {
       "id": "payee_water",
@@ -45,7 +51,12 @@
       "accountIndex": 6,
       "kind": "utility",
       "allowlisted": true,
-      "typicalAmount": 430
+      "typicalAmount": 430,
+      "aliases": [
+        "台水",
+        "自來水",
+        "水費"
+      ]
     },
     {
       "id": "payee_cht",
@@ -54,7 +65,14 @@
       "accountIndex": 7,
       "kind": "telecom",
       "allowlisted": true,
-      "typicalAmount": 799
+      "typicalAmount": 799,
+      "aliases": [
+        "中華電信",
+        "電話費",
+        "話費",
+        "網路費",
+        "市話"
+      ]
     },
     {
       "id": "payee_cable",
@@ -63,7 +81,12 @@
       "accountIndex": 8,
       "kind": "subscription",
       "allowlisted": true,
-      "typicalAmount": 599
+      "typicalAmount": 599,
+      "aliases": [
+        "有線電視",
+        "第四台",
+        "大台北有線"
+      ]
     },
     {
       "id": "payee_pharmacy",
@@ -72,7 +95,11 @@
       "accountIndex": 9,
       "kind": "medical",
       "allowlisted": true,
-      "typicalAmount": 850
+      "typicalAmount": 850,
+      "aliases": [
+        "藥局",
+        "健康人生"
+      ]
     },
     {
       "id": "payee_care",
@@ -81,7 +108,13 @@
       "accountIndex": 12,
       "kind": "care",
       "allowlisted": true,
-      "typicalAmount": 3200
+      "typicalAmount": 3200,
+      "aliases": [
+        "居家照護",
+        "安心居家",
+        "看護",
+        "照服員"
+      ]
     },
     {
       "id": "payee_gym",
@@ -90,7 +123,12 @@
       "accountIndex": 13,
       "kind": "subscription",
       "allowlisted": false,
-      "typicalAmount": 1088
+      "typicalAmount": 1088,
+      "aliases": [
+        "健身",
+        "銀髮健身",
+        "運動課程"
+      ]
     },
     {
       "id": "contact_xiaoyu",
@@ -98,7 +136,11 @@
       "address": "0xBcd4042DE499D14e55001CcbB24a551F3b954096",
       "accountIndex": 10,
       "kind": "person",
-      "allowlisted": false
+      "allowlisted": false,
+      "aliases": [
+        "小宇",
+        "孫子"
+      ]
     },
     {
       "id": "unknown_812",
@@ -106,7 +148,10 @@
       "address": "0x71bE63f3384f5fb98995898A86B02Fb2426c5788",
       "accountIndex": 11,
       "kind": "unknown",
-      "allowlisted": false
+      "allowlisted": false,
+      "aliases": [
+        "監管帳戶"
+      ]
     }
   ],
   "blocklist": [

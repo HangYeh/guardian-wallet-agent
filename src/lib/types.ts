@@ -26,6 +26,7 @@ export type Payee = {
   kind: PayeeKind;
   allowlisted: boolean;
   typicalAmount?: number; // 歷史中位數，供金額突增判斷
+  aliases?: string[]; // 解析後比對用的別名，例「台電」「電費」
 };
 
 /** 守護者設定、合約強制執行的支出規則。LLM 永遠不能修改這個物件。 */
