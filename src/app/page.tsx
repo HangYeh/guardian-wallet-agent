@@ -1,13 +1,8 @@
-import BillUpload from '@/components/BillUpload';
+import ElderConsole from '@/components/ElderConsole';
 import { effectivePolicy } from '@/lib/store';
 import { loadDemo, formatTWD } from '@/lib/demo';
 
 export const dynamic = 'force-dynamic';
-
-const PENDING_BUTTONS = [
-  { icon: '🛡️', label: '這是詐騙嗎？', hint: '把可疑訊息貼進來', cell: 'M4.3' },
-  { icon: '🔊', label: '叫門神唸給我聽', hint: '這個月的錢花到哪裡', cell: 'M5.3' },
-];
 
 export default function ElderPage() {
   const demo = loadDemo();
@@ -23,23 +18,7 @@ export default function ElderPage() {
         拿不準的事情它會先問{demo.persona.guardian.name}。
       </p>
 
-      <BillUpload />
-
-      <div className="mt-6 grid gap-3 sm:grid-cols-2">
-        {PENDING_BUTTONS.map((b) => (
-          <button
-            key={b.label}
-            type="button"
-            disabled
-            className="card flex cursor-not-allowed flex-col items-start gap-1 p-5 text-left"
-          >
-            <span className="text-3xl" aria-hidden="true">{b.icon}</span>
-            <span className="text-[1.35rem] font-bold leading-snug">{b.label}</span>
-            <span className="text-[0.85rem] text-[var(--color-ink-2)]">{b.hint}</span>
-            <span className="pill mt-2 text-[var(--color-ink-3)]">{b.cell} 接上</span>
-          </button>
-        ))}
-      </div>
+      <ElderConsole />
 
       <h2 className="mt-9 mb-3 text-[1.05rem] font-bold">這個月的狀況</h2>
 
@@ -101,7 +80,7 @@ export default function ElderPage() {
       </div>
 
       <div className="todo mt-6">
-        拍帳單已經接上視覺解析（M1.2）。詐騙判斷走 M4.3，語音走 M5.3。
+        拍帳單走視覺解析（M1.2），貼訊息走規則＋模型的合成風險（M4.2）。語音還沒接，走 M5.3。
         下面的數字全部讀自 <span className="mono">demo-data/guardian-demo.json</span>。
       </div>
     </main>

@@ -330,6 +330,16 @@ describe('模型不在的時候', () => {
     expect(r.elderExplanation.length).toBeLessThanOrEqual(40);
   });
 
+  it('阿嬤那句講的是「訊息像什麼」，不是「門神做了什麼」', async () => {
+    // 低風險的電費帳單如果因為安靜時段被 hold，那句話不能寫「幫妳處理好了」——
+    // 結果由標題那行負責，這一句只描述訊息。
+    const r = await assessRisk(input({ text: '台灣電力公司 本期應繳 1,280 元', amount: 1280, skipLlm: true }));
+    expect(r.level).toBe('low');
+    expect(r.elderExplanation).toBe('門神看不出詐騙的跡象');
+    expect(r.elderExplanation).not.toContain('繳好');
+    expect(r.elderExplanation).not.toContain('處理好');
+  });
+
   it('沒有模型時的家人說法會把兩組訊號分開講', async () => {
     const r = await assessRisk(
       input({ text: '健保署通知，30 分鐘內處理', payee: undefined, amount: 50_000, skipLlm: true }),
@@ -342,5 +352,92 @@ describe('模型不在的時候', () => {
     const r = await assessRisk(input({ text: '台灣電力公司 本期應繳 1,280 元', amount: 1280, skipLlm: true }));
     expect(r.guardianExplanation).toContain('沒有詐騙話術特徵');
     expect(r.level).toBe('low');
+  });
+});
+
+describe('模型自打嘴巴的時候', () => {
+  /**
+   * 幕三實測踩到的：模型給紅包 30 分（低於 medium 門檻，等於說「不是詐騙」），
+   * `scamType` 卻回 `family_emergency`，敘述寫成「這看起來像有人假裝家人要錢」——
+   * 而同一個畫面上印著「話術 0 項」。兩句話當場互相打臉。
+   */
+  const contradictory: AskModel = async () => ({
+    verdict: {
+      score: 30,
+      scamType: 'family_emergency',
+      tactics: [],
+      elderExplanation: '這看起來像有人假裝家人要錢。',
+      guardianExplanation: '訊息假冒家人名義要求轉帳，利用情感操控讓長輩匆忙匯款，可能是詐騙。',
+    },
+    model: 'stub',
+    latencyMs: 1,
+  });
+
+  it('分數低、規則沒抓到話術，卻宣稱是詐騙 —— 敘述整段不採用', async () => {
+    const r = await assessRisk(
+      input({ text: '幫我轉三千給孫子小宇當生日紅包', amount: 3000, payee: undefined, skipLlm: false, ask: contradictory }),
+    );
+    expect(r.groups.tactics).toHaveLength(0);
+    expect(r.elderExplanation).toBe('門神看不出詐騙的跡象');
+    expect(r.elderExplanation).not.toContain('假裝家人');
+    expect(r.guardianExplanation).toContain('沒有詐騙話術特徵');
+    expect(r.scamType).toBe('none'); // 類型也一起收回，不能只改文字
+  });
+
+  it('敘述丟掉了要說得出原因，但分數照用', async () => {
+    const r = await assessRisk(
+      input({ text: '幫我轉三千給孫子當紅包', amount: 3000, payee: undefined, skipLlm: false, ask: contradictory }),
+    );
+    expect(r.narrativeDropped).toContain('30');
+    expect(r.llmScore).toBe(30); // 分數沒被丟掉
+    expect(r.engine).toBe('rules+llm'); // 模型確實跑了，不能記成 rules-only
+  });
+
+  it('模型判 none 又給低分 —— 沒有矛盾，敘述照用', async () => {
+    const consistent: AskModel = async () => ({
+      verdict: {
+        score: 0,
+        scamType: 'none',
+        tactics: [],
+        elderExplanation: '這看起來像是正常的電費繳款通知單。',
+        guardianExplanation: '格式與內容都符合一般電費通知。',
+      },
+      model: 'stub',
+      latencyMs: 1,
+    });
+    const r = await assessRisk(
+      input({ text: '台灣電力公司 本期應繳 1,280 元', amount: 1280, skipLlm: false, ask: consistent }),
+    );
+    expect(r.elderExplanation).toContain('電費');
+    expect(r.narrativeDropped).toBeUndefined();
+  });
+
+  it('模型給高分並宣稱是詐騙 —— 那是它的本職，敘述照用', async () => {
+    const confident: AskModel = async () => ({
+      verdict: {
+        score: 85,
+        scamType: 'impersonation',
+        tactics: ['冒充機關'],
+        elderExplanation: '對方假裝是健保署。',
+        guardianExplanation: '冒充公務機關要求匯款。',
+      },
+      model: 'stub',
+      latencyMs: 1,
+    });
+    const r = await assessRisk(
+      input({ text: '健保署通知，請於 30 分鐘內處理', payee: undefined, skipLlm: false, ask: confident }),
+    );
+    expect(r.elderExplanation).toBe('對方假裝是健保署。');
+    expect(r.scamType).toBe('impersonation');
+    expect(r.narrativeDropped).toBeUndefined();
+  });
+
+  it('規則抓到話術時，模型宣稱詐騙就有依據，不算矛盾', async () => {
+    const r = await assessRisk(
+      // 這則規則會抓到 AUTHORITY_IMPERSONATION，所以模型即使給低分也不算自打嘴巴
+      input({ text: '健保署通知您涉及詐領', payee: undefined, skipLlm: false, ask: contradictory }),
+    );
+    expect(r.groups.tactics.length).toBeGreaterThan(0);
+    expect(r.narrativeDropped).toBeUndefined();
   });
 });

@@ -312,6 +312,7 @@ async function runPipeline(resolved: Resolved, body: IntakeBody, runId: string) 
       engine: risk.engine,
       model: risk.model ?? null,
       fallbackReason: risk.fallbackReason ?? null,
+      narrativeDropped: risk.narrativeDropped ?? null,
     },
     memoHash: intent.idempotencyKey,
   });
@@ -377,6 +378,7 @@ async function runPipeline(resolved: Resolved, body: IntakeBody, runId: string) 
       engine: risk.engine,
       model: risk.model ?? null,
       fallbackReason: risk.fallbackReason ?? null,
+      narrativeDropped: risk.narrativeDropped ?? null,
     },
     decision,
     payment,

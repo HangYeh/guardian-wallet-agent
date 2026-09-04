@@ -215,11 +215,31 @@ function scamTypeOf(groups: SignalGroups): ScamType {
   return 'none';
 }
 
-function fallbackElder(level: 'low' | 'medium' | 'high', groups: SignalGroups): string {
+/**
+ * 阿嬤看的那一句。
+ *
+ * 它描述的是**這則訊息像什麼**，不是**門神做了什麼** —— 後者由標題那行負責
+ * （「幫妳繳好了」／「要等家人點頭」／「這是詐騙」）。兩件事混在一起講過一次：
+ * 低風險的電費帳單因為在安靜時段被 hold，畫面卻寫「門神幫妳處理好了」。
+ */
+function fallbackElder(groups: SignalGroups): string {
   const first = groups.tactics[0];
   if (first && ELDER_WORDS[first.code]) return ELDER_WORDS[first.code]!;
-  if (level === 'low') return '看起來是平常的繳費，門神幫妳處理好了';
-  return '這筆比較大，門神想先問過家人再付';
+  return '門神看不出詐騙的跡象';
+}
+
+/**
+ * 模型自打嘴巴：它宣稱這是某一類詐騙，但自己給的分數低於 medium 門檻，
+ * 而規則也一條話術都沒抓到。
+ *
+ * 實測就是幕三那筆紅包：模型給 30 分（等於說「不是詐騙」），`scamType` 卻回
+ * `family_emergency`，敘述寫成「這看起來像有人假裝家人要錢」—— 而同一個畫面上
+ * 印著「話術 0 項」。**兩句話當場互相打臉，比只有其中一句還糟。**
+ *
+ * 分數留著（它沒把分數拉低，地板也擋著），只丟掉沒有依據的敘述。
+ */
+function selfContradictory(verdict: LlmVerdict, groups: SignalGroups): boolean {
+  return verdict.scamType !== 'none' && verdict.score < 40 && groups.tactics.length === 0;
 }
 
 function fallbackGuardian(score: number, groups: SignalGroups, note: string): string {
@@ -265,6 +285,8 @@ export type Assessment = RiskAssessment & {
   engine: 'rules-only' | 'rules+llm';
   /** 走規則路徑的原因（模型關掉、逾時、出錯、硬鎖跳過）。UI 要誠實顯示。 */
   fallbackReason?: string;
+  /** 模型的敘述被丟掉時記下原因。分數還是用了，只有那幾句話沒用。 */
+  narrativeDropped?: string;
   model?: string;
   latencyMs?: number;
 };
@@ -288,7 +310,7 @@ export async function assessRisk(input: AssessInput): Promise<Assessment> {
       score: rules.score,
       llmScore: 0,
       scamType: scamTypeOf(groups),
-      elderExplanation: fallbackElder(level, groups),
+      elderExplanation: fallbackElder(groups),
       guardianExplanation: fallbackGuardian(rules.score, groups, `，${reason}`),
       engine: 'rules-only',
       fallbackReason: reason,
@@ -319,18 +341,22 @@ export async function assessRisk(input: AssessInput): Promise<Assessment> {
 
   const score = composite(rules.score, verdict.score, false);
   const level = levelOf(score, false);
+  const contradictory = selfContradictory(verdict, groups);
 
   return {
     ...base,
     level,
     score,
     llmScore: verdict.score,
-    scamType: verdict.scamType,
-    elderExplanation: verdict.elderExplanation || fallbackElder(level, groups),
+    scamType: contradictory ? 'none' : verdict.scamType,
+    elderExplanation: (!contradictory && verdict.elderExplanation) || fallbackElder(groups),
     guardianExplanation:
-      verdict.guardianExplanation ||
+      (!contradictory && verdict.guardianExplanation) ||
       fallbackGuardian(rules.score, groups, `，模型另給 ${verdict.score} 分`),
     engine: 'rules+llm',
+    narrativeDropped: contradictory
+      ? `模型給 ${verdict.score} 分（等於說不是詐騙）卻把它描述成 ${verdict.scamType}，敘述沒有依據，改用規則的說法`
+      : undefined,
     model,
     latencyMs,
   };
