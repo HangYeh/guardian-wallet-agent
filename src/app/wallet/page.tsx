@@ -1,6 +1,6 @@
 import { currentChainMode } from '@/lib/intent';
 import { loadDemo, formatTWD } from '@/lib/demo';
-import { state } from '@/lib/store';
+import { effectivePolicy, state } from '@/lib/store';
 import { walletFor } from '@/lib/wallet';
 import { loadDeployment } from '@/lib/wallet-chain';
 
@@ -46,6 +46,7 @@ const CHECKS = [
 
 export default async function WalletPage() {
   const demo = loadDemo();
+  const policy = effectivePolicy();
   const mode = currentChainMode();
   const chain = CHAIN_LABEL[mode] ?? CHAIN_LABEL.mock;
   const payments = state().payments;
@@ -53,7 +54,7 @@ export default async function WalletPage() {
   // 位址與餘額都問「實際在用的那個 adapter」，不是讀環境變數猜。
   // 猜的話「畫面說 local、其實跑 mock」不會被發現 —— 而那正是最該被發現的事。
   const deployment = mode === 'mock' ? undefined : loadDeployment(mode);
-  const adapter = walletFor(demo.policy);
+  const adapter = walletFor(policy);
   const actualMode = adapter.mode;
 
   let balance: number | undefined;
@@ -96,10 +97,10 @@ export default async function WalletPage() {
           <div className="mono mt-1 text-xl font-bold">
             {spentToday === undefined
               ? '讀不到'
-              : formatTWD(Math.max(0, demo.policy.dailyCap - spentToday))}
+              : formatTWD(Math.max(0, policy.dailyCap - spentToday))}
           </div>
           <div className="mt-1 text-[0.8rem] text-[var(--color-ink-2)]">
-            單日上限 {formatTWD(demo.policy.dailyCap)}，已用 {formatTWD(spentToday ?? 0)}
+            單日上限 {formatTWD(policy.dailyCap)}，已用 {formatTWD(spentToday ?? 0)}
           </div>
         </div>
       </div>

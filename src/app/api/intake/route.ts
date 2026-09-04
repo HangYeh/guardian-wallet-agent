@@ -9,7 +9,7 @@ import { walletFor } from '@/lib/wallet';
 import { buildIntent, currentChainMode, intentToTransaction } from '@/lib/intent';
 import { visionEnabled } from '@/lib/llm';
 import { matchPayee, parseImage, parseText, type ParseResult } from '@/lib/parser';
-import { state } from '@/lib/store';
+import { effectivePolicy, state } from '@/lib/store';
 import type { IntentSource, TraceStep } from '@/lib/types';
 
 export const dynamic = 'force-dynamic';
@@ -125,6 +125,7 @@ async function intake(body: IntakeBody) {
 
 async function runPipeline(resolved: Resolved, body: IntakeBody, runId: string) {
   const demo = loadDemo();
+  const policy = effectivePolicy();
   const image = 'image' in resolved ? resolved.image : undefined;
   const inputText = 'text' in resolved ? resolved.text : undefined;
   const isImage = image !== undefined;
@@ -194,7 +195,7 @@ async function runPipeline(resolved: Resolved, body: IntakeBody, runId: string) 
     draft: f,
     rawText,
     source,
-    policy: demo.policy,
+    policy: policy,
     payee,
     taskId: body.taskId,
   });
@@ -214,9 +215,9 @@ async function runPipeline(resolved: Resolved, body: IntakeBody, runId: string) 
     warnings.push(parsed.fallbackReason);
   }
   if (!payee) warnings.push('收款人不在名單內');
-  if (intent.amount > demo.policy.perTxCap) {
+  if (intent.amount > policy.perTxCap) {
     warnings.push(
-      `要求金額 ${intent.amount} 元超過單筆上限 ${demo.policy.perTxCap} 元，授權上限已壓到 ${intent.maxAmount} 元`,
+      `要求金額 ${intent.amount} 元超過單筆上限 ${policy.perTxCap} 元，授權上限已壓到 ${intent.maxAmount} 元`,
     );
   }
   if (f.confidence < 0.6) warnings.push('解析把握度偏低');
@@ -257,8 +258,8 @@ async function runPipeline(resolved: Resolved, body: IntakeBody, runId: string) 
   // 這件事要在畫面上講清楚，不能讓人以為詐騙偵測已經在跑了。
   const { decision, payment } = await executeIntent({
     intent,
-    policy: demo.policy,
-    wallet: walletFor(demo.policy),
+    policy: policy,
+    wallet: walletFor(policy),
     payee,
   });
 

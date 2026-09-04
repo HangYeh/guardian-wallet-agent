@@ -1,4 +1,5 @@
 import BillUpload from '@/components/BillUpload';
+import { effectivePolicy } from '@/lib/store';
 import { loadDemo, formatTWD } from '@/lib/demo';
 
 export const dynamic = 'force-dynamic';
@@ -10,6 +11,7 @@ const PENDING_BUTTONS = [
 
 export default function ElderPage() {
   const demo = loadDemo();
+  const policy = effectivePolicy();
   const unpaid = demo.pendingBills.filter((b) => b.status === 'unpaid');
   const total = unpaid.reduce((s, b) => s + b.amount, 0);
 
@@ -75,7 +77,7 @@ export default function ElderPage() {
           </thead>
           <tbody>
             {unpaid.map((b) => {
-              const auto = b.amount <= demo.policy.approvalThreshold;
+              const auto = b.amount <= policy.approvalThreshold;
               return (
                 <tr key={b.id}>
                   <td className="font-medium">{b.merchant}</td>
@@ -88,7 +90,7 @@ export default function ElderPage() {
                       <span className="pill text-[var(--color-ochre)]">問{demo.persona.guardian.name}</span>
                     )}
                     <span className="ml-2 text-[var(--color-ink-3)]">
-                      {auto ? '在白名單、金額也在範圍內' : `超過 ${formatTWD(demo.policy.approvalThreshold)} 要家人點頭`}
+                      {auto ? '在白名單、金額也在範圍內' : `超過 ${formatTWD(policy.approvalThreshold)} 要家人點頭`}
                     </span>
                   </td>
                 </tr>

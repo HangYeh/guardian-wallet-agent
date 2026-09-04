@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { effectivePolicy } from '@/lib/store';
 import { checkGuardian } from '@/lib/guardian-auth';
 import { rateGuard } from '@/lib/rate-limit';
 import { assetNetworkFor, currentChainMode } from '@/lib/intent';
@@ -86,7 +87,8 @@ export async function POST(request: Request) {
   }
 
   const demo = loadDemo();
-  const wallet = walletFor(demo.policy);
+  const policy = effectivePolicy();
+  const wallet = walletFor(policy);
   const now = new Date();
 
   const allowlisted = demo.payees.find((p) => p.allowlisted)!;
@@ -109,7 +111,7 @@ export async function POST(request: Request) {
 
   const plan: Record<Attack, { payee: Payee; amount: number; memoHash: `0x${string}`; expiresAt: string }> = {
     not_allowlisted: { payee: stranger, amount: 500, memoHash: fresh(), expiresAt: future },
-    over_cap: { payee: allowlisted, amount: demo.policy.perTxCap * 20, memoHash: fresh(), expiresAt: future },
+    over_cap: { payee: allowlisted, amount: policy.perTxCap * 20, memoHash: fresh(), expiresAt: future },
     replay: { payee: allowlisted, amount: 100, memoHash: fresh(), expiresAt: future },
     expired: { payee: allowlisted, amount: 100, memoHash: fresh(), expiresAt: past },
   };

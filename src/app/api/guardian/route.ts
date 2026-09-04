@@ -1,9 +1,8 @@
 import { NextResponse } from 'next/server';
-import { loadDemo } from '@/lib/demo';
 import { approvePayment, rejectPayment } from '@/lib/execute';
 import { checkGuardian } from '@/lib/guardian-auth';
 import { rateGuard } from '@/lib/rate-limit';
-import { state } from '@/lib/store';
+import { effectivePolicy, state } from '@/lib/store';
 import { walletFor } from '@/lib/wallet';
 
 export const dynamic = 'force-dynamic';
@@ -68,10 +67,10 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: false, error: '找不到對應的付款或意圖' }, { status: 404 });
     }
 
-    const demo = loadDemo();
+    const policy = effectivePolicy();
     const result = await approvePayment(body.paymentId, {
-      policy: demo.policy,
-      wallet: walletFor(demo.policy),
+      policy: policy,
+      wallet: walletFor(policy),
       intent,
     });
     return NextResponse.json({ ok: true, payment: result.payment, events: result.events });
