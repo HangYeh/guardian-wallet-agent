@@ -1,3 +1,4 @@
+import LiveTrace from '@/components/LiveTrace';
 import { counts } from '@/lib/store';
 import { loadDemo } from '@/lib/demo';
 
@@ -47,9 +48,25 @@ export default function AgentPage() {
         ))}
       </div>
 
-      <p className="mt-4 text-[0.85rem] text-[var(--color-ink-2)]">
-        目前是空的，因為還沒有任何輸入進來。管線本身如下，每一步都標了在哪一格接上。
+      <h2 className="mt-8 mb-1 text-[1.05rem] font-bold">現在正在跑的</h2>
+      <p className="page-sub">
+        按一顆按鈕，或在另一個分頁拍一張帳單。步驟是伺服器一步一步推過來的，
+        不是等整條管線跑完才一次吐出來 —— 所以模型讀圖的那幾秒鐘，第一行早就在了。
       </p>
+
+      <LiveTrace
+        triggers={[
+          { id: 'bill', label: '示範帳單', body: { scenarioId: 'electricity' } },
+          ...demo.messages.map((m) => ({
+            id: m.id,
+            label: m.type === 'scam' ? `詐騙：${m.from}` : `正常：${m.from}`,
+            body: { messageId: m.id },
+          })),
+        ]}
+      />
+
+      <h2 className="mt-8 mb-1 text-[1.05rem] font-bold">完整管線</h2>
+      <p className="page-sub">七個步驟，每一步都標了在哪一格接上。</p>
 
       <div className="scroll-x card mt-3">
         <table className="grid">
@@ -101,7 +118,9 @@ export default function AgentPage() {
       </div>
 
       <div className="todo mt-6">
-        即時軌跡的推送在 M1.3 接上，會用伺服器推送事件讓七個步驟依序出現。
+        直播走 <span className="mono">GET /api/events</span>（SSE）。斷線由瀏覽器自己重連，
+        重連時帶著 <span className="mono">Last-Event-ID</span>，中間漏掉的會補齊。
+        風險評估（M4.1／M4.2）與付款（M2.4）接上後，同一條軌跡就會長到七步。
       </div>
     </main>
   );

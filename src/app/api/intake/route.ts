@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { NextResponse } from 'next/server';
+import { newRunId, publish } from '@/lib/bus';
 import { loadDemo } from '@/lib/demo';
 import { buildIntent, currentChainMode, intentToTransaction } from '@/lib/intent';
 import { visionEnabled } from '@/lib/llm';
@@ -48,6 +49,14 @@ const MAX_IMAGE_CHARS = 4_000_000;
 
 const IMAGE_DATA_URL = /^data:image\/(png|jpeg|jpg|webp);base64,[A-Za-z0-9+/=\s]+$/;
 
+/** 輸入來源的中文說法。軌跡是要給評審和家人看的，畫面上不該出現 message 這種字。 */
+const SOURCE_LABEL: Record<IntentSource, string> = {
+  image: '照片',
+  text: '文字',
+  message: '訊息',
+  voice: '語音',
+};
+
 /** 呼叫端自訂的任務代號會進到冪等鍵，所以字元集與長度都要限制。 */
 const TASK_ID_PATTERN = /^[\w.:-]{1,80}$/;
 
@@ -74,8 +83,6 @@ export async function GET(request: Request) {
 }
 
 async function intake(body: IntakeBody) {
-  const demo = loadDemo();
-
   let resolved: Resolved | { error: string };
   try {
     resolved = resolveInput(body);
@@ -89,20 +96,47 @@ async function intake(body: IntakeBody) {
     return NextResponse.json({ ok: false, error: resolved.error }, { status: 400 });
   }
 
+  const runId = newRunId();
+  try {
+    return await runPipeline(resolved, body, runId);
+  } catch (err) {
+    // 模型逾時、金鑰失效、劇本檔案不見 —— 舞台上任何一種都可能發生。
+    // 一定要收乾淨：不收的話軌跡頁會留著一個永遠跑不完的 run，
+    // 看起來像門神當掉了，而不是這一次讀失敗了。
+    const detail = err instanceof Error ? err.message : String(err);
+    publish({ runId, kind: 'run.error', detail: `這次沒讀成功：${detail}` });
+    return NextResponse.json({ ok: false, runId, error: detail }, { status: 500 });
+  }
+}
+
+async function runPipeline(resolved: Resolved, body: IntakeBody, runId: string) {
+  const demo = loadDemo();
   const image = 'image' in resolved ? resolved.image : undefined;
   const inputText = 'text' in resolved ? resolved.text : undefined;
   const isImage = image !== undefined;
   const source = resolved.source;
 
+  const startedAt = Date.now();
   const trace: TraceStep[] = [];
-  const step = (phase: TraceStep['phase'], detail: string, tool?: string) =>
+  const step = (phase: TraceStep['phase'], detail: string, tool?: string) => {
     trace.push({ t: new Date().toISOString(), phase, tool, detail });
+    // 推到匯流排，軌跡頁在這一刻就長出一行。不是等整條管線跑完才一次吐出來 ——
+    // 模型還在讀那張圖的四秒裡，畫面上 observe 那一行已經在了。
+    publish({ runId, kind: 'step', phase, tool, detail, elapsedMs: Date.now() - startedAt });
+  };
+
+  publish({
+    runId,
+    kind: 'run.start',
+    detail: isImage ? '收到一張帳單照片' : `收到一則${SOURCE_LABEL[source]}輸入`,
+    elapsedMs: 0,
+  });
 
   step(
     'observe',
     image
       ? `收到一張圖，約 ${Math.round(image.length / 1365)} KB`
-      : `收到 ${source} 輸入，共 ${inputText!.length} 字`,
+      : `收到一則${SOURCE_LABEL[source]}，共 ${inputText!.length} 字`,
   );
 
   const parsed: ParseResult = image
@@ -183,7 +217,7 @@ async function intake(body: IntakeBody) {
       intentId: intent.id,
       summary: isImage
         ? '收到一張帳單照片'
-        : `收到一則${source === 'text' ? '文字' : source}輸入，共 ${rawText.length} 字`,
+        : `收到一則${SOURCE_LABEL[source]}輸入，共 ${rawText.length} 字`,
       details: { source, chars: rawText.length },
     }),
     auditEvent({
@@ -204,8 +238,18 @@ async function intake(body: IntakeBody) {
     }),
   );
 
+  publish({
+    runId,
+    kind: 'run.end',
+    detail: `${intent.merchant}｜授權上限 ${intent.maxAmount} 元${
+      warnings.length ? `｜${warnings.length} 項要注意` : ''
+    }`,
+    elapsedMs: Date.now() - startedAt,
+  });
+
   return NextResponse.json({
     ok: true,
+    runId,
     engine: parsed.engine,
     model: parsed.model,
     latencyMs: parsed.latencyMs,

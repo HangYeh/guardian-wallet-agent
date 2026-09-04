@@ -1,4 +1,5 @@
 import type { AuditEvent, Payment, PaymentIntent, TraceStep } from '@/lib/types';
+import { resetBus } from '@/lib/bus';
 import { reloadDemo } from '@/lib/demo';
 
 /**
@@ -30,6 +31,7 @@ export function state(): RuntimeState {
 /** 一鍵重置：清掉執行期狀態並重讀劇本。舞台每一幕之間都會按。 */
 export function resetAll(): { state: RuntimeState; scenarios: string[] } {
   g.__guardianState = empty();
+  resetBus();
   const demo = reloadDemo();
   return { state: g.__guardianState, scenarios: demo.scenarios.map((s) => s.id) };
 }

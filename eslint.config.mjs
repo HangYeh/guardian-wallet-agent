@@ -12,6 +12,10 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Hardhat 產生的型別與 artifacts 不是我們寫的，也不進版控的審查範圍
+    "chain/artifacts/**",
+    "chain/cache/**",
+    "chain/types/**",
   ]),
 ]);
 
