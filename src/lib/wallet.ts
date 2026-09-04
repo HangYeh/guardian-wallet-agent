@@ -77,7 +77,20 @@ function emptyState(): MockState {
 }
 
 const g = globalThis as typeof globalThis & { __guardianWallet?: MockState };
-g.__guardianWallet ??= emptyState();
+
+/**
+ * 取 mock 錢包狀態，沒有就現做一份。
+ *
+ * 這裡刻意**不是**在模組載入時初始化一次、然後到處寫 `mockState()`。
+ * 那個驚嘆號是在對型別檢查器說謊：`resetAll()` 會把這個全域清成 undefined，
+ * 之後第一次讀就炸「Cannot read properties of undefined (reading 'spentByDay')」。
+ * 實測是**重置後的第一發 intake 直接 500** —— 而重置正是舞台上每一幕之間會按的鍵。
+ *
+ * 改成用的時候才取：誰把它清掉都不會有人看到 undefined。
+ */
+function mockState(): MockState {
+  return (g.__guardianWallet ??= emptyState());
+}
 
 /** 合約用的日索引：`block.timestamp / 1 days`。這裡照抄，兩邊的「今天」才會是同一天。 */
 function dayIndex(now: Date): number {
@@ -90,15 +103,15 @@ export class MockWallet implements WalletAdapter {
   constructor(private readonly policy: Policy) {}
 
   async balance(): Promise<number> {
-    return g.__guardianWallet!.balance;
+    return mockState().balance;
   }
 
   async spentToday(now: Date = new Date()): Promise<number> {
-    return g.__guardianWallet!.spentByDay.get(dayIndex(now)) ?? 0;
+    return mockState().spentByDay.get(dayIndex(now)) ?? 0;
   }
 
   async isSettled(memoHash: `0x${string}`): Promise<boolean> {
-    return g.__guardianWallet!.usedIntent.has(memoHash);
+    return mockState().usedIntent.has(memoHash);
   }
 
   /**
@@ -113,7 +126,7 @@ export class MockWallet implements WalletAdapter {
    * 使用者修好問題重送反而被當成重放。
    */
   async pay(args: PayArgs, now: Date = new Date()): Promise<PayReceipt> {
-    const s = g.__guardianWallet!;
+    const s = mockState();
 
     if (new Date(args.expiresAt).getTime() < now.getTime()) {
       throw new PolicyViolation('PolicyViolation: intent expired');

@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import { loadDemo } from '@/lib/demo';
 import { effectivePolicy, resetAll, setAllowlisted, state, updatePolicy } from '@/lib/store';
+import { MockWallet, type PayArgs } from '@/lib/wallet';
 
 /**
  * 執行期政策覆寫。
@@ -90,5 +91,80 @@ describe('白名單增減', () => {
     setAllowlisted('contact_xiaoyu', true);
     resetAll();
     expect(effectivePolicy().allowlist).not.toContain('contact_xiaoyu');
+  });
+});
+
+describe('重置與 mock 錢包的接縫', () => {
+  /**
+   * 這一組是回歸測試。
+   *
+   * `resetAll()` 把 `globalThis.__guardianWallet` 清成 undefined，而 `wallet.ts`
+   * 原本在模組載入時初始化一次、之後到處寫 `g.__guardianWallet!`。那個驚嘆號
+   * 騙過了型別檢查器，所以編譯與既有測試都沒有意見 —— 直到實際按下重置：
+   * **下一發 intake 回 500，`Cannot read properties of undefined (reading 'spentByDay')`。**
+   *
+   * 沒被抓到的原因是上面那些測試按了重置，卻沒有人在重置**之後**碰錢包。
+   * 所以這裡每一條都刻意是「先 resetAll，再用錢包」。
+   */
+  const wallet = () => new MockWallet(effectivePolicy());
+
+  it('重置後讀日累計不會炸', async () => {
+    resetAll();
+    await expect(wallet().spentToday()).resolves.toBe(0);
+  });
+
+  it('重置後讀餘額不會炸，而且回到起點', async () => {
+    resetAll();
+    await expect(wallet().balance()).resolves.toBe(100_000);
+  });
+
+  it('重置後查冪等鍵不會炸', async () => {
+    resetAll();
+    await expect(wallet().isSettled(`0x${'ab'.repeat(32)}`)).resolves.toBe(false);
+  });
+
+  it('重置後可以直接付款 —— 這就是舞台上第二次演幕一的路徑', async () => {
+    resetAll();
+    const receipt = await wallet().pay({
+      payee: {
+        id: 'payee_taipower',
+        name: '台灣電力公司',
+        address: '0x9965507D1a55bcC2695C58ba16FB37d819B0A4dc',
+        kind: 'utility',
+        allowlisted: true,
+      },
+      amount: 1280,
+      memoHash: `0x${'11'.repeat(32)}`,
+      expiresAt: new Date(Date.now() + 600_000).toISOString(),
+      approved: false,
+    });
+    expect(receipt.txHash).toMatch(/^0x[0-9a-f]{64}$/);
+    await expect(wallet().spentToday()).resolves.toBe(1280);
+  });
+
+  it('付過款再重置，日累計與防重放都回到起點（不然第二次演出會被自己擋下來）', async () => {
+    const memoHash = `0x${'22'.repeat(32)}` as const;
+    const args: PayArgs = {
+      payee: {
+        id: 'payee_taipower',
+        name: '台灣電力公司',
+        address: '0x9965507D1a55bcC2695C58ba16FB37d819B0A4dc',
+        kind: 'utility',
+        allowlisted: true,
+      },
+      amount: 1280,
+      memoHash,
+      expiresAt: new Date(Date.now() + 600_000).toISOString(),
+      approved: false,
+    };
+
+    await wallet().pay(args);
+    await expect(wallet().isSettled(memoHash)).resolves.toBe(true);
+
+    resetAll();
+
+    await expect(wallet().isSettled(memoHash)).resolves.toBe(false);
+    await expect(wallet().spentToday()).resolves.toBe(0);
+    await expect(wallet().pay(args)).resolves.toBeTruthy(); // 同一把鍵可以再付一次
   });
 });
