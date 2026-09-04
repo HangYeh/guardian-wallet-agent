@@ -1,0 +1,61 @@
+{
+  "network": "baseSepolia",
+  "chainId": 84532,
+  "deployedAt": "2026-09-04T15:04:27.564Z",
+  "guardian": "0x16e2dd7ce84094375060ef08d269000e02fce1cb",
+  "operator": "0x50a2ca7c98988b724780583952151837a85c88ed",
+  "token": "0x61d9d3c033c2c7546a2fc13b5cd4151102f70f40",
+  "wallet": "0x75eeca5be658337159b8e6b8c27f44e037f4d525",
+  "initialBalance": 100000,
+  "policy": {
+    "perTxCap": 3000,
+    "dailyCap": 5000,
+    "approvalThreshold": 2000,
+    "newPayeeRequiresApproval": true,
+    "newPayeeCooldownHours": 24,
+    "quietHours": [
+      22,
+      7
+    ],
+    "allowlist": [
+      "payee_taipower",
+      "payee_water",
+      "payee_cht",
+      "payee_cable",
+      "payee_pharmacy",
+      "payee_care"
+    ]
+  },
+  "allowlist": [
+    {
+      "id": "payee_taipower",
+      "name": "台灣電力公司",
+      "address": "0x9965507D1a55bcC2695C58ba16FB37d819B0A4dc"
+    },
+    {
+      "id": "payee_water",
+      "name": "台灣自來水公司",
+      "address": "0x976EA74026E726554dB657fA54763abd0C3a0aa9"
+    },
+    {
+      "id": "payee_cht",
+      "name": "中華電信",
+      "address": "0x14dC79964da2C08b23698B3D3cc7Ca32193d9955"
+    },
+    {
+      "id": "payee_cable",
+      "name": "大台北有線電視",
+      "address": "0x23618e81E3f5cdF7f54C3d65f7FBc0aBf5B21E8f"
+    },
+    {
+      "id": "payee_pharmacy",
+      "name": "健康人生藥局",
+      "address": "0xa0Ee7A142d267C1f36714E4a8F75612F20a79720"
+    },
+    {
+      "id": "payee_care",
+      "name": "安心居家照護",
+      "address": "0xFABB0ac9d68B0B445fB7357272Ff202C5651694a"
+    }
+  ]
+}
