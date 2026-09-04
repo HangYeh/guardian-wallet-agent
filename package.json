@@ -13,7 +13,8 @@
     "chain:compile": "cd chain && npx hardhat compile",
     "chain:test": "cd chain && npx hardhat test",
     "chain:node": "cd chain && npx hardhat node",
-    "chain:clean": "cd chain && npx hardhat clean"
+    "chain:clean": "cd chain && npx hardhat clean",
+    "scan:secrets": "node scripts/scan-secrets.mjs"
   },
   "dependencies": {
     "next": "16.3.4",

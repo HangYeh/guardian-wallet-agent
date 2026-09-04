@@ -50,14 +50,14 @@ describe('parseWithRules：劇本裡的四則訊息', () => {
   it('投資詐騙：20000 元', () => {
     const f = parseWithRules(msg('m_invest'), demo.payees);
     expect(f.amount).toBe(20_000);
-    expect(f.statedAccount).toBe('013098765432100');
+    expect(f.statedAccount).toBe('998098765432100');
   });
 
   it('假孫子：15000 元，名字對到真的小宇', () => {
     const f = parseWithRules(msg('m_grandchild'), demo.payees);
     expect(f.amount).toBe(15_000);
     expect(f.payeeName).toBe('小宇（孫子）');
-    expect(f.statedAccount).toBe('700002123456789');
+    expect(f.statedAccount).toBe('997002123456789');
   });
 
   it('阿嬤自己包的紅包：中文數字三千要換算成 3000', () => {
@@ -147,7 +147,7 @@ describe('matchPayee', () => {
 
   it('詐騙話術裡的「監管帳戶」對到封鎖名單那一筆', () => {
     const p = matchPayee(demo.payees, '國家反詐騙監管帳戶');
-    expect(p?.id).toBe('unknown_812');
+    expect(p?.id).toBe('unknown_999');
     expect(demo.blocklist.some((b) => b.account === normalizeAccount(p!.name))).toBe(true);
   });
 

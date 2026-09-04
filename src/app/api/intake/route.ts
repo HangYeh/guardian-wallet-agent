@@ -34,6 +34,15 @@ type IntakeBody = {
   taskId?: string;
 };
 
+/**
+ * 單次輸入的字數上限。一張帳單或一則訊息不會超過這個長度，
+ * 超過就是誤貼或惡意灌入 —— 不該原封不動送進要付費的模型。
+ */
+const MAX_INPUT_CHARS = 4000;
+
+/** 呼叫端自訂的任務代號會進到冪等鍵，所以字元集與長度都要限制。 */
+const TASK_ID_PATTERN = /^[\w.:-]{1,80}$/;
+
 export async function POST(request: Request) {
   let body: IntakeBody;
   try {
@@ -174,8 +183,16 @@ async function intake(body: IntakeBody) {
 function resolveInput(body: IntakeBody): { text: string; source: IntentSource } | { error: string } {
   const demo = loadDemo();
 
+  if (body.taskId && !TASK_ID_PATTERN.test(body.taskId)) {
+    return { error: 'taskId 只能是 80 字元以內的英數與 . : - _' };
+  }
+
   if (body.text?.trim()) {
-    return { text: body.text.trim(), source: body.source ?? 'text' };
+    const t = body.text.trim();
+    if (t.length > MAX_INPUT_CHARS) {
+      return { error: `輸入 ${t.length} 字，超過上限 ${MAX_INPUT_CHARS} 字` };
+    }
+    return { text: t, source: body.source ?? 'text' };
   }
 
   if (body.messageId) {
@@ -212,6 +229,8 @@ function resolveInput(body: IntakeBody): { text: string; source: IntentSource } 
 }
 
 function readDemoFile(name: string): string {
+  // 檔名目前只來自我們自己 commit 進去的劇本，但讀檔的參數就是該擋，不看來源。
+  if (!/^[\w-]+\.[a-z]{2,4}$/.test(name)) throw new Error(`不合法的劇本檔名：${name}`);
   return readFileSync(join(process.cwd(), 'demo-data', name), 'utf8');
 }
 
