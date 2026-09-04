@@ -9,7 +9,11 @@
     "lint": "eslint",
     "test": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "chain:compile": "cd chain && npx hardhat compile",
+    "chain:test": "cd chain && npx hardhat test",
+    "chain:node": "cd chain && npx hardhat node",
+    "chain:clean": "cd chain && npx hardhat clean"
   },
   "dependencies": {
     "next": "16.3.4",
