@@ -1,12 +1,15 @@
+import { AUDIT_FILE, readAuditFile, verifyChain } from '@/lib/audit';
 import { loadDemo, formatTWD, spendByMerchant, lastUsed } from '@/lib/demo';
-import { state } from '@/lib/store';
 
 export const dynamic = 'force-dynamic';
 
 export default function AuditPage() {
   const demo = loadDemo();
   const r = demo.expectedReport;
-  const events = state().audit;
+  // 刻意讀檔案而不是讀記憶體：檔案才是證據。
+  // 有人手動改了 data/audit.jsonl，這一頁就該指出來 —— 讀記憶體是看不到的。
+  const { events, badLines } = readAuditFile();
+  const verdict = verifyChain(events);
   const spend = spendByMerchant(demo);
   const maxSpend = Math.max(...spend.map((s) => s.total));
 
@@ -109,33 +112,81 @@ export default function AuditPage() {
         </div>
       </div>
 
-      <h2 className="mt-8 mb-3 text-[1.05rem] font-bold">稽核軌跡</h2>
+      <h2 className="mt-8 mb-1 text-[1.05rem] font-bold">稽核軌跡</h2>
+      <p className="page-sub">
+        每一筆把前一筆的雜湊包進自己的雜湊裡。改動任何一筆，之後所有的雜湊都對不上。
+        這不是防竄改 —— 本機檔案擋不住有權限的人 —— 是讓竄改一定留下痕跡。
+        證據讀的是 <span className="mono">{AUDIT_FILE.split(/[\/]/).slice(-2).join('/')}</span>，不是記憶體。
+      </p>
+
       {events.length === 0 ? (
         <div className="card p-5 text-[0.88rem] text-[var(--color-ink-2)]">
-          本次執行還沒有稽核事件。事件從 M2.4 開始寫入，
-          每一筆都會帶上對應的 memoHash，可以跟鏈上事件對照。
+          還沒有稽核事件。去阿嬤頁拍一張帳單，或在門神軌跡頁按任何一顆按鈕。
         </div>
       ) : (
-        <div className="scroll-x card">
-          <table className="grid">
-            <thead><tr><th>時間</th><th>類型</th><th>誰</th><th>摘要</th></tr></thead>
-            <tbody>
-              {events.map((e) => (
-                <tr key={e.id}>
-                  <td className="mono text-[0.75rem]">{e.ts}</td>
-                  <td className="mono">{e.type}</td>
-                  <td>{e.actor}</td>
-                  <td>{e.summary}</td>
+        <>
+          <div
+            className="card p-4"
+            style={{
+              borderLeft: `4px solid ${verdict.ok ? 'var(--color-celadon)' : 'var(--color-cinnabar)'}`,
+            }}
+          >
+            <div className="label" style={{ color: verdict.ok ? 'var(--color-celadon)' : 'var(--color-cinnabar)' }}>
+              {verdict.ok ? '鏈接完整' : '鏈接斷了'}
+            </div>
+            <p className="mt-1 text-[0.88rem]">
+              {verdict.ok
+                ? `${verdict.length} 筆事件，每一筆的雜湊都接得上前一筆。`
+                : `第 ${verdict.brokenAt} 筆開始對不上。${verdict.detail}`}
+            </p>
+            {badLines.length > 0 && (
+              <p className="mt-1 text-[0.82rem] text-[var(--color-cinnabar)]">
+                另有 {badLines.length} 行讀不出來（第 {badLines.join('、')} 行），檔案被改壞了。
+              </p>
+            )}
+          </div>
+
+          <div className="scroll-x card mt-3">
+            <table className="grid">
+              <thead>
+                <tr>
+                  <th className="num">#</th>
+                  <th>時間</th>
+                  <th>類型</th>
+                  <th>誰</th>
+                  <th>摘要</th>
+                  <th>雜湊</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody>
+                {events.map((e) => {
+                  const broken = !verdict.ok && e.seq >= verdict.brokenAt;
+                  return (
+                    <tr key={e.id} style={broken ? { color: 'var(--color-cinnabar)' } : undefined}>
+                      <td className="num mono">{e.seq}</td>
+                      <td className="mono text-[0.75rem]">{e.ts.slice(11, 19)}</td>
+                      <td className="mono">{e.type}</td>
+                      <td>{e.actor}</td>
+                      <td>{e.summary}</td>
+                      <td className="mono text-[0.72rem]" title={e.hash}>
+                        {e.hash.slice(0, 10)}…
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </>
       )}
 
       <div className="todo mt-6">
         週報的數字目前直接讀自劇本的期望值，用來當作 M5.1 與 M5.2 的驗收標準。
         異常規則實作完成後，這四張卡片會改成真的算出來的結果，數字必須一模一樣。
+        <br />
+        想自己驗？把 <span className="mono">data/audit.jsonl</span> 裡任何一筆的
+        <span className="mono"> summary </span>改一個字，重新整理這一頁，
+        它會告訴你斷在第幾筆。
       </div>
     </main>
   );

@@ -3,11 +3,13 @@ import { join } from 'node:path';
 import { NextResponse } from 'next/server';
 import { newRunId, publish } from '@/lib/bus';
 import { loadDemo } from '@/lib/demo';
+import { executeIntent, write } from '@/lib/execute';
+import { walletFor } from '@/lib/wallet';
 import { buildIntent, currentChainMode, intentToTransaction } from '@/lib/intent';
 import { visionEnabled } from '@/lib/llm';
 import { matchPayee, parseImage, parseText, type ParseResult } from '@/lib/parser';
 import { state } from '@/lib/store';
-import type { AuditEvent, IntentSource, TraceStep } from '@/lib/types';
+import type { IntentSource, TraceStep } from '@/lib/types';
 
 export const dynamic = 'force-dynamic';
 
@@ -48,6 +50,9 @@ const MAX_INPUT_CHARS = 4000;
 const MAX_IMAGE_CHARS = 4_000_000;
 
 const IMAGE_DATA_URL = /^data:image\/(png|jpeg|jpg|webp);base64,[A-Za-z0-9+/=\s]+$/;
+
+/** 三種決策的中文說法。 */
+const DECISION_LABEL = { auto: '自動繳', hold: '等家人核准', block: '已攔截' } as const;
 
 /** 輸入來源的中文說法。軌跡是要給評審和家人看的，畫面上不該出現 message 這種字。 */
 const SOURCE_LABEL: Record<IntentSource, string> = {
@@ -210,38 +215,63 @@ async function runPipeline(resolved: Resolved, body: IntakeBody, runId: string) 
   const s = state();
   s.intents.push(intent);
   s.trace.push(...trace);
-  s.audit.push(
-    auditEvent({
-      type: 'intent.received',
-      actor: 'elder',
-      intentId: intent.id,
-      summary: isImage
-        ? '收到一張帳單照片'
-        : `收到一則${SOURCE_LABEL[source]}輸入，共 ${rawText.length} 字`,
-      details: { source, chars: rawText.length },
-    }),
-    auditEvent({
-      type: 'intent.parsed',
-      actor: 'agent',
-      intentId: intent.id,
-      summary: `解析為 ${intent.merchant} ${intent.amount} 元，授權上限 ${intent.maxAmount} 元`,
-      details: {
-        engine: parsed.engine,
-        model: parsed.model,
-        latencyMs: parsed.latencyMs,
-        confidence: f.confidence,
-        statedAccount: f.statedAccount,
-        payeeId: payee?.id ?? null,
-        taskId: intent.taskId,
-      },
-      memoHash: intent.idempotencyKey,
-    }),
+
+  write({
+    type: 'intent.received',
+    actor: 'elder',
+    intentId: intent.id,
+    summary: isImage
+      ? '收到一張帳單照片'
+      : `收到一則${SOURCE_LABEL[source]}輸入，共 ${rawText.length} 字`,
+    details: { source, chars: rawText.length },
+  });
+  write({
+    type: 'intent.parsed',
+    actor: 'agent',
+    intentId: intent.id,
+    summary: `解析為 ${intent.merchant} ${intent.amount} 元，授權上限 ${intent.maxAmount} 元`,
+    details: {
+      engine: parsed.engine,
+      model: parsed.model ?? null,
+      latencyMs: parsed.latencyMs ?? null,
+      confidence: f.confidence,
+      statedAccount: f.statedAccount,
+      payeeId: payee?.id ?? null,
+      taskId: intent.taskId,
+    },
+    memoHash: intent.idempotencyKey,
+  });
+
+  // ---- 政策與執行 ----
+  //
+  // 風險引擎還沒接（M4.x），所以 risk 目前一律是預設的 low。
+  // 這件事要在畫面上講清楚，不能讓人以為詐騙偵測已經在跑了。
+  const { decision, payment } = executeIntent({
+    intent,
+    policy: demo.policy,
+    wallet: walletFor(demo.policy),
+    payee,
+  });
+
+  step(
+    'verify',
+    `政策判定 ${decision.action}：${decision.reason}`,
+    'policy.decide',
   );
+  if (payment.status === 'executed') {
+    step('tool', `已付款，交易雜湊 ${payment.txHash?.slice(0, 14)}…`, 'wallet.pay');
+  } else if (payment.status === 'pending_approval') {
+    step('verify', `生成提案 ${payment.id}，等守護者核准`, 'wallet.propose');
+  } else if (payment.status === 'blocked') {
+    step('verify', '已攔截，不會產生任何付款', 'policy.block');
+  } else if (payment.status === 'failed') {
+    step('verify', `鏈上擋下：${payment.revertReason}`, 'wallet.pay');
+  }
 
   publish({
     runId,
     kind: 'run.end',
-    detail: `${intent.merchant}｜授權上限 ${intent.maxAmount} 元${
+    detail: `${intent.merchant}｜${DECISION_LABEL[decision.action]}｜${intent.maxAmount} 元${
       warnings.length ? `｜${warnings.length} 項要注意` : ''
     }`,
     elapsedMs: Date.now() - startedAt,
@@ -258,6 +288,8 @@ async function runPipeline(resolved: Resolved, body: IntakeBody, runId: string) 
     fields: f,
     transcript: parsed.transcript,
     intent,
+    decision,
+    payment,
     payee: payee ?? null,
     transaction: intentToTransaction(intent, payee),
     trace,
@@ -344,8 +376,4 @@ function readDemoImage(name: string): string {
   const ext = name.split('.').pop()!.toLowerCase();
   const mime = ext === 'png' ? 'image/png' : ext === 'webp' ? 'image/webp' : 'image/jpeg';
   return `data:${mime};base64,${readFileSync(path).toString('base64')}`;
-}
-
-function auditEvent(e: Omit<AuditEvent, 'id' | 'ts'>): AuditEvent {
-  return { id: `evt_${crypto.randomUUID().slice(0, 8)}`, ts: new Date().toISOString(), ...e };
 }

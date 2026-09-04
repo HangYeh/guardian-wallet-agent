@@ -41,6 +41,7 @@ export type PolicyRule =
   | 'OVER_APPROVAL_THRESHOLD'
   | 'DAILY_CAP_EXCEEDED'
   | 'QUIET_HOURS'
+  | 'ASSET_NETWORK_MISMATCH'
   // --- 判斷過程本身壞掉 ---
   | 'EVALUATION_FAILED';
 
@@ -57,6 +58,14 @@ export type PolicyContext = {
   payeeAddedAt?: string;
   /** 這把冪等鍵是不是已經結算過了。合約會擋，但畫面應該先講清楚。 */
   alreadySettled?: boolean;
+  /**
+   * 現在這個行程實際連著的資產與網路，例如 tTWD@eip155:31337。
+   *
+   * 意圖產生時記了一個，執行時可能已經不是同一條鏈了（切了 CHAIN_MODE、
+   * 或者本地鏈跟測試網同時開著）。演講 Slide 29 的 MATCH 那一步要比對的就是這個。
+   * 不傳就跳過檢查 —— 但呼叫端該傳，執行層一定會傳。
+   */
+  chainAssetNetwork?: string;
   now?: Date;
 };
 
@@ -178,6 +187,16 @@ function evaluate(ctx: PolicyContext): PolicyDecision {
       'hold',
       `今天已經付掉 ${fmt(spentToday)} 元，再付 ${fmt(amount)} 元會超過單日上限 ` +
         `${fmt(policy.dailyCap)} 元。`,
+    );
+  }
+
+  if (ctx.chainAssetNetwork && ctx.chainAssetNetwork !== intent.assetNetwork) {
+    // 授權是對「某一條鏈上的某一種資產」開的。換了鏈，那份授權就不算數了 ——
+    // 就算金額、收款人都一樣，那也是另一筆錢。
+    hit(
+      'ASSET_NETWORK_MISMATCH',
+      'hold',
+      `這筆授權是給 ${intent.assetNetwork} 的，現在連的是 ${ctx.chainAssetNetwork}，不是同一條鏈。`,
     );
   }
 

@@ -188,6 +188,8 @@ export type AuditEventType =
   | 'policy.updated';
 
 export type AuditEvent = {
+  /** 從 1 開始的序號。鏈斷掉時要能指出「斷在第幾筆」。 */
+  seq: number;
   id: string;
   ts: string;
   type: AuditEventType;
@@ -197,6 +199,16 @@ export type AuditEvent = {
   summary: string;
   details: Record<string, unknown>;
   memoHash?: `0x${string}`;
+
+  // ---- 雜湊鏈 ----
+  //
+  // 純附加寫入的日誌不算證據，因為門神自己就能改。每一筆把前一筆的雜湊
+  // 包進自己的雜湊裡，改動任何一筆，之後所有的雜湊都對不上。
+  // 這不是防竄改（本機檔案擋不住 root），是**讓竄改留下痕跡**。
+  /** 前一筆的 hash；第一筆是 0x00…00。 */
+  prevHash: `0x${string}`;
+  /** keccak256(這一筆的正規化內容 + prevHash)。 */
+  hash: `0x${string}`;
 };
 
 // ---------------------------------------------------------------------------

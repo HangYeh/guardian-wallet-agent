@@ -1,4 +1,5 @@
 import type { AuditEvent, Payment, PaymentIntent, TraceStep } from '@/lib/types';
+import { clearAuditFile } from '@/lib/audit';
 import { resetBus } from '@/lib/bus';
 import { reloadDemo } from '@/lib/demo';
 
@@ -32,6 +33,10 @@ export function state(): RuntimeState {
 export function resetAll(): { state: RuntimeState; scenarios: string[] } {
   g.__guardianState = empty();
   resetBus();
+  clearAuditFile();
+  // mock 錢包的餘額、日累計、已用過的冪等鍵也要一起回到起點，
+  // 否則舞台上第二次演幕一會被自己的防重放擋下來。
+  (globalThis as { __guardianWallet?: unknown }).__guardianWallet = undefined;
   const demo = reloadDemo();
   return { state: g.__guardianState, scenarios: demo.scenarios.map((s) => s.id) };
 }
