@@ -64,6 +64,18 @@ export type PaymentIntent = {
   confidence: number; // 0–1
 
   // ---- 受管授權欄位 ----
+  /**
+   * x402 的三種 scheme（演講 Slide 14）裡我們選 exact。
+   *
+   * 帳單金額在授權前就是已知且固定的，沒有「用多少算多少」的計量問題，
+   * 所以不需要 upto。maxAmount 存在的理由不是計量，是**政策天花板**：
+   * 模型讀錯數字時，授權額度不會跟著錯。
+   *
+   * 而且讀到的金額若超過天花板，不是靜靜照天花板付（那等於付一筆沒人要求的
+   * 金額），是停下來問家人 —— 所以結算金額永遠等於信封裡寫的那一個數字，
+   * 這才配叫 exact。
+   */
+  scheme: 'exact';
   taskId: string; // "bill-2026-09-taipower"，一個任務一個 id
   resource: string; // 付的是什麼："電費 2026-09"；x402 情境下是 URL
   merchant: string; // payeeId 解析後的正式名稱

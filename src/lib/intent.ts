@@ -174,6 +174,7 @@ export function buildIntent(args: {
     rawText: args.rawText,
     confidence: args.draft.confidence,
 
+    scheme: 'exact',
     taskId,
     resource:
       args.draft.kind === 'bill' ? `${merchant} ${period} 帳單` : `轉帳給 ${merchant}`,
