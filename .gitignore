@@ -1,0 +1,42 @@
+# env / secrets
+.env
+.env.*
+!.env.example
+*.key
+apikey.txt
+elekey.txt
+gmikey.txt
+
+# node
+node_modules/
+npm-debug.log*
+.npm/
+
+# next.js
+.next/
+out/
+build/
+.vercel/
+next-env.d.ts
+
+# hardhat
+chain/artifacts/
+chain/cache/
+chain/typechain-types/
+chain/deployments/local.json
+
+# runtime data
+data/
+video-src/
+public/audio-cache/
+fixtures/tmp/
+
+# os / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+
+# test
+coverage/
