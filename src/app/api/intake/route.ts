@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { NextResponse } from 'next/server';
 import { newRunId, publish } from '@/lib/bus';
 import { rateGuard } from '@/lib/rate-limit';
+import { levelOf, ruleSignals } from '@/lib/risk-rules';
 import { loadDemo } from '@/lib/demo';
 import { executeIntent, write } from '@/lib/execute';
 import { walletFor } from '@/lib/wallet';
@@ -195,7 +196,7 @@ async function runPipeline(resolved: Resolved, body: IntakeBody, runId: string) 
     draft: f,
     rawText,
     source,
-    policy: policy,
+    policy,
     payee,
     taskId: body.taskId,
   });
@@ -252,15 +253,61 @@ async function runPipeline(resolved: Resolved, body: IntakeBody, runId: string) 
     memoHash: intent.idempotencyKey,
   });
 
-  // ---- 政策與執行 ----
+  // ---- 風險 ----
   //
-  // 風險引擎還沒接（M4.x），所以 risk 目前一律是預設的 low。
-  // 這件事要在畫面上講清楚，不能讓人以為詐騙偵測已經在跑了。
+  // 跑在 rawText 上，不是跑在抽出來的欄位上。圖片的話 rawText 就是**另一顆模型**
+  // 獨立讀出來的逐字稿 —— 因為指令可以印在帳單角落，只看欄位是看不到的。
+  //
+  // 這一層完全不呼叫模型。模型的風險評估在 M4.2 疊上來，而且只能往上加分，
+  // 不能把這裡的分數往下壓（§7.3 的地板）。
+  const risk = ruleSignals({
+    text: rawText,
+    amount: intent.amount,
+    approvalThreshold: policy.approvalThreshold,
+    payee,
+    statedAccount: f.statedAccount,
+    blocklist: demo.blocklist,
+    typicalAmount: payee?.typicalAmount,
+    quietHours: policy.quietHours,
+  });
+  const riskLevel = levelOf(risk.score, risk.hardLocked);
+
+  if (riskLevel !== 'low') {
+    warnings.push(`風險 ${riskLevel}（規則分 ${risk.score}）：${risk.signals[0]?.evidence ?? ''}`);
+  }
+
+  step(
+    'tool',
+    risk.signals.length === 0
+      ? '風險規則全部沒命中，規則分 0'
+      : `規則分 ${risk.score}（${riskLevel}${risk.hardLocked ? '，硬鎖' : ''}）：${risk.signals.map((s) => s.code).join('、')}`,
+    'ruleSignals',
+  );
+
+  write({
+    type: 'risk.assessed',
+    actor: 'agent',
+    intentId: intent.id,
+    summary: `規則風險 ${risk.score} 分（${riskLevel}）${risk.hardLocked ? '，命中硬鎖' : ''}`,
+    details: {
+      rulesScore: risk.score,
+      level: riskLevel,
+      hardLocked: risk.hardLocked,
+      signals: risk.signals.map((s) => ({ code: s.code, weight: s.weight, evidence: s.evidence })),
+      // 模型還沒接，誠實記下來，免得日後看稽核以為模型當時有跑
+      llmScore: null,
+      engine: 'rules-only',
+    },
+    memoHash: intent.idempotencyKey,
+  });
+
+  // ---- 政策與執行 ----
   const { decision, payment } = await executeIntent({
     intent,
-    policy: policy,
+    policy,
     wallet: walletFor(policy),
     payee,
+    risk: riskLevel,
   });
 
   step(
@@ -298,6 +345,13 @@ async function runPipeline(resolved: Resolved, body: IntakeBody, runId: string) 
     fields: f,
     transcript: parsed.transcript,
     intent,
+    risk: {
+      score: risk.score,
+      level: riskLevel,
+      hardLocked: risk.hardLocked,
+      signals: risk.signals,
+      engine: 'rules-only' as const,
+    },
     decision,
     payment,
     payee: payee ?? null,
