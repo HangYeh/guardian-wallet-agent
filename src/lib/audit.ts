@@ -17,7 +17,17 @@ import type { AuditEvent } from '@/lib/types';
  * 要嘛留下一個對不上的斷點。兩條路都走不通才叫證據。
  */
 
-export const AUDIT_FILE = join(process.cwd(), 'data', 'audit.jsonl');
+/**
+ * 稽核檔的位置。做成函式而不是常數，是為了讓測試可以指到暫存檔，
+ * 不去動開發時真的在用的那一份 —— 測試污染證據檔是很難查的一種問題。
+ *
+ * 代價是 Turbopack 靜態分析不出這個路徑，會退而把整個專案打包進 server bundle
+ * 並在 build 時警告。下面四個檔案操作因此標了 turbopackIgnore：
+ * 路徑是動態的這件事是刻意的，不是漏寫。
+ */
+export function auditFile(): string {
+  return process.env.GUARDIAN_AUDIT_FILE?.trim() || join(process.cwd(), 'data', 'audit.jsonl');
+}
 
 /** 創世 hash。第一筆的 prevHash。 */
 export const GENESIS: `0x${string}` = `0x${'0'.repeat(64)}`;
@@ -85,13 +95,13 @@ export function appendEvent(draft: Draft, previous?: AuditEvent, now: Date = new
 
 /** 落地。檔案是證據，記憶體只是快取。 */
 export function persist(event: AuditEvent): void {
-  mkdirSync(dirname(AUDIT_FILE), { recursive: true });
-  appendFileSync(AUDIT_FILE, `${JSON.stringify(event)}\n`, 'utf8');
+  mkdirSync(/*turbopackIgnore: true*/ dirname(auditFile()), { recursive: true });
+  appendFileSync(/*turbopackIgnore: true*/ auditFile(), `${JSON.stringify(event)}\n`, 'utf8');
 }
 
 export function clearAuditFile(): void {
   try {
-    rmSync(AUDIT_FILE);
+    rmSync(/*turbopackIgnore: true*/ auditFile());
   } catch {
     // 本來就不存在
   }
@@ -105,7 +115,7 @@ export function clearAuditFile(): void {
 export function readAuditFile(): { events: AuditEvent[]; badLines: number[] } {
   let raw: string;
   try {
-    raw = readFileSync(AUDIT_FILE, 'utf8');
+    raw = readFileSync(/*turbopackIgnore: true*/ auditFile(), 'utf8');
   } catch {
     return { events: [], badLines: [] };
   }

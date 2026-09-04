@@ -1,4 +1,4 @@
-import { AUDIT_FILE, readAuditFile, verifyChain } from '@/lib/audit';
+import { auditFile, readAuditFile, verifyChain } from '@/lib/audit';
 import { loadDemo, formatTWD, spendByMerchant, lastUsed } from '@/lib/demo';
 
 export const dynamic = 'force-dynamic';
@@ -116,7 +116,7 @@ export default function AuditPage() {
       <p className="page-sub">
         每一筆把前一筆的雜湊包進自己的雜湊裡。改動任何一筆，之後所有的雜湊都對不上。
         這不是防竄改 —— 本機檔案擋不住有權限的人 —— 是讓竄改一定留下痕跡。
-        證據讀的是 <span className="mono">{AUDIT_FILE.split(/[\/]/).slice(-2).join('/')}</span>，不是記憶體。
+        證據讀的是 <span className="mono">{auditFile().split(/[\\/]/).slice(-2).join('/')}</span>，不是記憶體。
       </p>
 
       {events.length === 0 ? (

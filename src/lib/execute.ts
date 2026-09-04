@@ -1,4 +1,4 @@
-import { appendEvent, persist } from '@/lib/audit';
+import { appendEvent, persist, readAuditFile } from '@/lib/audit';
 import { assetNetworkFor, currentChainMode } from '@/lib/intent';
 import { decide, type PolicyContext } from '@/lib/policy';
 import { state } from '@/lib/store';
@@ -173,8 +173,11 @@ export function executeIntent(input: ExecuteInput): ExecuteResult {
 /**
  * 守護者核准一筆等待中的付款。
  *
- * 核准跳過的只有「核准門檻」那一道 —— 其餘五道照舊。
- * 家人能做的是「同意這個金額」，不是「解除所有限制」。
+ * 核准跳過兩道：**白名單**與**核准門檻**。家人核准的是「這一個收款人、
+ * 這一個金額」，那個動作本身就是白名單的授權來源。
+ *
+ * 不跳過的：效期、防重放、單筆上限、單日上限、以及下面這兩道守衛。
+ * 家人能同意一筆付款，不能解除長期的硬上限。
  */
 export function approvePayment(
   paymentId: string,
@@ -185,6 +188,27 @@ export function approvePayment(
   if (!payment) throw new Error(`沒有這筆付款：${paymentId}`);
   if (payment.status !== 'pending_approval') {
     throw new Error(`這筆付款的狀態是 ${payment.status}，不是等待核准`);
+  }
+
+  // 守衛一：沒有真實收款地址的付款不可核准。
+  //
+  // 名單裡對不到的收款人，付款物件上掛的是零地址佔位。核准它等於把錢燒掉，
+  // 而且畫面會顯示「已繳」。家人要付給這個人，得先把他的地址加進名單。
+  if (payment.payee.id === 'unmatched' || /^0x0{40}$/i.test(payment.payee.address)) {
+    throw new Error(
+      `「${payment.payee.name}」還沒有收款地址，不能核准。先把他加進收款人名單再說。`,
+    );
+  }
+
+  // 守衛二：核准的當下鏈別要對得上。
+  //
+  // 授權是對「某一條鏈上的某一種資產」開的。從提案到核准中間可能過了幾小時，
+  // 期間有人切了 CHAIN_MODE —— 那份授權就不算數了（演講 Slide 29 的 MATCH）。
+  const chainNow = assetNetworkFor(currentChainMode());
+  if (chainNow !== args.intent.assetNetwork) {
+    throw new Error(
+      `這筆授權是給 ${args.intent.assetNetwork} 的，現在連的是 ${chainNow}，不是同一條鏈。`,
+    );
   }
 
   const events: AuditEvent[] = [
@@ -266,12 +290,26 @@ export function rejectPayment(paymentId: string, now: Date = new Date()) {
 
 // ---------------------------------------------------------------------------
 
-/** 接上雜湊鏈、寫進記憶體、落地成檔案。三件事必須一起發生，所以包成一個函式。 */
+/**
+ * 接上雜湊鏈、寫進記憶體、落地成檔案。三件事必須一起發生，所以包成一個函式。
+ *
+ * 開頭那一段是被實測抓出來的：伺服器重啟之後記憶體是空的，但檔案還在。
+ * 少了它，重啟後的第一筆會從 seq 1、prevHash 創世重新開始，接在一條已經
+ * 到 seq 15 的鏈後面 —— 稽核頁會顯示「鏈接斷了」，但根本沒有人動過任何東西。
+ * 在舞台上那就是一個假警報，而且是最難解釋的那種。
+ */
 export function write(
   draft: Omit<AuditEvent, 'seq' | 'id' | 'ts' | 'prevHash' | 'hash'>,
   now: Date = new Date(),
 ): AuditEvent {
   const s = state();
+
+  if (s.audit.length === 0) {
+    // 檔案才是鏈的本體，記憶體只是這個行程的快取。接回去，不要另起一條。
+    // 檔案若已經被改壞，接上去之後那個斷點仍然看得見 —— 這正是我們要的。
+    s.audit.push(...readAuditFile().events);
+  }
+
   const event = appendEvent(draft, s.audit.at(-1), now);
   s.audit.push(event);
   persist(event);
