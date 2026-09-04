@@ -41,6 +41,28 @@ export const WEIGHTS: Record<RiskSignalCode, number> = {
  */
 export const HARD_LOCKS: readonly RiskSignalCode[] = ['BLOCKLIST_HIT', 'PROMPT_INJECTION'];
 
+/**
+ * 同一類話術用了幾種**不同**手法，要反映在強度上。
+ *
+ * 去重原本是要擋「立即！立即！馬上！」那種同一條樣式的重複 —— 那是同一個事實
+ * 講三遍，不是三個事實。但四條**不同**樣式（老師帶單、保證獲利、名額有限、
+ * 承諾報酬率）是真的四份獨立證據，全部壓成一筆 20 分會讓一則寫滿話術的訊息
+ * 跟只提一句的訊息同分。
+ *
+ * 實測就是這樣壞的：幕二的投資詐騙命中四條投資樣式只拿 20 分，
+ * 剩下的分數全來自「新收款人」「超過門檻」這種政策事實 ——
+ * **等於宣稱抓到詐騙，其實只是嫌它金額大。**
+ *
+ * 每多一條不同樣式加 5 分，最多加到基礎權重的兩倍。有上限是因為
+ * 樣式表會長大，不能讓「多寫幾條正則」自動變成「分數變高」。
+ */
+const REPEAT_BONUS = 5;
+
+function strengthOf(code: RiskSignalCode, distinctHits: number): number {
+  const base = WEIGHTS[code];
+  return Math.min(base * 2, base + REPEAT_BONUS * Math.max(0, distinctHits - 1));
+}
+
 type Pattern = { re: RegExp; why: string };
 
 /**
@@ -151,9 +173,10 @@ export function ruleSignals(input: RuleInput): RuleResult {
   const now = input.now ?? new Date();
   const signals: RiskSignal[] = [];
 
-  const add = (code: RiskSignalCode, evidence: string) => {
-    if (signals.some((s) => s.code === code)) return; // 同一種訊號只算一次
-    signals.push({ code, weight: WEIGHTS[code], evidence });
+  /** 記一筆訊號。同一種代碼只會有一筆；`hits` 是這一類命中的不同樣式數。 */
+  const add = (code: RiskSignalCode, evidence: string, hits = 1) => {
+    if (signals.some((s) => s.code === code)) return;
+    signals.push({ code, weight: strengthOf(code, hits), evidence });
   };
 
   // ── 封鎖名單：帳號或名稱命中就直接鎖 ───────────────────────────────
@@ -169,12 +192,17 @@ export function ruleSignals(input: RuleInput): RuleResult {
 
   // ── 樣式比對 ──────────────────────────────────────────────────────
   for (const [code, patterns] of Object.entries(PATTERNS) as [RiskSignalCode, Pattern[]][]) {
+    // 不 break：要數出這一類用了幾種不同手法，不是只找到一條就算。
+    const hits: string[] = [];
     for (const p of patterns) {
       const m = text.match(p.re);
       if (m && m.index !== undefined) {
-        add(code, `${p.why}：「${excerpt(text, m.index, m[0].length)}」`);
-        break;
+        hits.push(`${p.why}：「${excerpt(text, m.index, m[0].length)}」`);
       }
+    }
+    if (hits.length > 0) {
+      const evidence = hits.length === 1 ? hits[0] : `${hits[0]}（另有 ${hits.length - 1} 項同類話術）`;
+      add(code, evidence, hits.length);
     }
   }
 

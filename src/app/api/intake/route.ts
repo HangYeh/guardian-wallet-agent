@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { NextResponse } from 'next/server';
 import { newRunId, publish } from '@/lib/bus';
 import { rateGuard } from '@/lib/rate-limit';
-import { levelOf, ruleSignals } from '@/lib/risk-rules';
+import { assessRisk } from '@/lib/risk';
 import { loadDemo } from '@/lib/demo';
 import { executeIntent, write } from '@/lib/execute';
 import { walletFor } from '@/lib/wallet';
@@ -258,9 +258,10 @@ async function runPipeline(resolved: Resolved, body: IntakeBody, runId: string) 
   // 跑在 rawText 上，不是跑在抽出來的欄位上。圖片的話 rawText 就是**另一顆模型**
   // 獨立讀出來的逐字稿 —— 因為指令可以印在帳單角落，只看欄位是看不到的。
   //
-  // 這一層完全不呼叫模型。模型的風險評估在 M4.2 疊上來，而且只能往上加分，
-  // 不能把這裡的分數往下壓（§7.3 的地板）。
-  const risk = ruleSignals({
+  // 規則先跑，模型後疊，而且模型**只能往上加分**（§7.3 的地板）。
+  // 命中硬鎖時連問都不問模型 —— 分級已經定案，問了也改不了結果，
+  // 而且可以少讓那段惡意文字進一次模型。
+  const risk = await assessRisk({
     text: rawText,
     amount: intent.amount,
     approvalThreshold: policy.approvalThreshold,
@@ -270,33 +271,47 @@ async function runPipeline(resolved: Resolved, body: IntakeBody, runId: string) 
     typicalAmount: payee?.typicalAmount,
     quietHours: policy.quietHours,
   });
-  const riskLevel = levelOf(risk.score, risk.hardLocked);
+  const riskLevel = risk.level;
 
   if (riskLevel !== 'low') {
-    warnings.push(`風險 ${riskLevel}（規則分 ${risk.score}）：${risk.signals[0]?.evidence ?? ''}`);
+    warnings.push(`風險 ${riskLevel}（${risk.score} 分）：${risk.guardianExplanation}`);
   }
 
   step(
     'tool',
     risk.signals.length === 0
       ? '風險規則全部沒命中，規則分 0'
-      : `規則分 ${risk.score}（${riskLevel}${risk.hardLocked ? '，硬鎖' : ''}）：${risk.signals.map((s) => s.code).join('、')}`,
+      : `規則分 ${risk.rulesScore}（話術 ${risk.groups.tacticScore}、政策 ${risk.rulesScore - risk.groups.tacticScore}）：${risk.signals.map((s) => s.code).join('、')}`,
     'ruleSignals',
+  );
+  step(
+    'plan',
+    risk.engine === 'rules+llm'
+      ? `模型另判 ${risk.llmScore} 分，合成後 ${risk.score}（${riskLevel}）`
+      : `沒問模型：${risk.fallbackReason}。分數維持 ${risk.score}（${riskLevel}）`,
+    'assessRisk',
   );
 
   write({
     type: 'risk.assessed',
     actor: 'agent',
     intentId: intent.id,
-    summary: `規則風險 ${risk.score} 分（${riskLevel}）${risk.hardLocked ? '，命中硬鎖' : ''}`,
+    summary: `風險 ${risk.score} 分（${riskLevel}）${risk.hardLocked ? '，命中硬鎖' : ''}｜${risk.engine}`,
     details: {
-      rulesScore: risk.score,
+      score: risk.score,
+      rulesScore: risk.rulesScore,
+      llmScore: risk.engine === 'rules+llm' ? risk.llmScore : null,
       level: riskLevel,
       hardLocked: risk.hardLocked,
-      signals: risk.signals.map((s) => ({ code: s.code, weight: s.weight, evidence: s.evidence })),
-      // 模型還沒接，誠實記下來，免得日後看稽核以為模型當時有跑
-      llmScore: null,
-      engine: 'rules-only',
+      // 話術特徵與規則原因分開記。「有風險」跟「要問人」是兩件事（§7.3 B 案），
+      // 稽核紀錄也要看得出來是哪一種，不然事後分不清門神當時在擔心什麼。
+      tacticScore: risk.groups.tacticScore,
+      tactics: risk.groups.tactics.map((s) => ({ code: s.code, weight: s.weight, evidence: s.evidence })),
+      policyReasons: risk.groups.policyReasons.map((s) => ({ code: s.code, weight: s.weight, evidence: s.evidence })),
+      scamType: risk.scamType,
+      engine: risk.engine,
+      model: risk.model ?? null,
+      fallbackReason: risk.fallbackReason ?? null,
     },
     memoHash: intent.idempotencyKey,
   });
@@ -347,10 +362,21 @@ async function runPipeline(resolved: Resolved, body: IntakeBody, runId: string) 
     intent,
     risk: {
       score: risk.score,
+      rulesScore: risk.rulesScore,
+      llmScore: risk.engine === 'rules+llm' ? risk.llmScore : null,
       level: riskLevel,
       hardLocked: risk.hardLocked,
       signals: risk.signals,
-      engine: 'rules-only' as const,
+      // 畫面要分開講，不能把「有人想騙你」跟「這件事要問人」混在同一個數字裡
+      tactics: risk.groups.tactics,
+      tacticScore: risk.groups.tacticScore,
+      policyReasons: risk.groups.policyReasons,
+      scamType: risk.scamType,
+      elderExplanation: risk.elderExplanation,
+      guardianExplanation: risk.guardianExplanation,
+      engine: risk.engine,
+      model: risk.model ?? null,
+      fallbackReason: risk.fallbackReason ?? null,
     },
     decision,
     payment,
