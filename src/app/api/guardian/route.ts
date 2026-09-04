@@ -61,7 +61,7 @@ export async function POST(request: Request) {
     }
 
     const demo = loadDemo();
-    const result = approvePayment(body.paymentId, {
+    const result = await approvePayment(body.paymentId, {
       policy: demo.policy,
       wallet: walletFor(demo.policy),
       intent,

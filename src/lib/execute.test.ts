@@ -13,9 +13,10 @@ import type { Payee, Policy } from '@/lib/types';
 /**
  * 執行層的測試。
  *
- * 前兩條是被實測抓出來的 bug 的回歸測試，不是憑空想的情境：
+ * 中間三條是被實測抓出來的 bug 的回歸測試，不是憑空想的情境：
  *   1. 伺服器重啟後稽核鏈假性斷裂 —— 沒人動過任何東西，稽核頁卻說被竄改了
- *   2. 沒有收款地址的付款可以被核准 —— 錢會付到零地址，畫面顯示「已繳」
+ *   2. 沒有收款地址的付款可以被核准 —— 錢會付到零地址，畫面還顯示「已繳」
+ *   3. 提案與核准之間換了鏈，核准照樣過
  */
 
 // 寫到暫存資料夾，不去動開發時真的在用的那一份稽核檔
@@ -30,7 +31,7 @@ const POLICY: Policy = {
   approvalThreshold: 2000,
   newPayeeRequiresApproval: true,
   newPayeeCooldownHours: 24,
-  quietHours: undefined, // 測試不要被跑測試的時間影響
+  quietHours: undefined, // 測試不該因為跑的時間是深夜就變成 hold
   allowlist: ['payee_taipower'],
 };
 
@@ -70,14 +71,14 @@ function wallet() {
   return new MockWallet(POLICY);
 }
 
-beforeEach(() => {
+beforeEach(async () => {
   resetAll();
-  new MockWallet(POLICY).reset();
+  await wallet().reset();
 });
 
 describe('執行層', () => {
-  it('白名單內、額度內 → 直接付掉，稽核留下四筆', () => {
-    const r = executeIntent({
+  it('白名單內、額度內 → 直接付掉，稽核留下兩筆', async () => {
+    const r = await executeIntent({
       intent: intentFor(),
       policy: POLICY,
       wallet: wallet(),
@@ -91,14 +92,20 @@ describe('執行層', () => {
     expect(state().audit.map((e) => e.type)).toEqual(['policy.decided', 'payment.executed']);
   });
 
-  it('超過門檻 → 生成提案，核准之後才付', () => {
+  it('超過門檻 → 生成提案，核准之後才付', async () => {
     const intent = intentFor({ amount: 2500 });
-    const r = executeIntent({ intent, policy: POLICY, wallet: wallet(), payee: TAIPOWER, now: NOW });
+    const r = await executeIntent({
+      intent,
+      policy: POLICY,
+      wallet: wallet(),
+      payee: TAIPOWER,
+      now: NOW,
+    });
     expect(r.decision.action).toBe('hold');
     expect(r.payment.status).toBe('pending_approval');
 
     state().intents.push(intent);
-    const approved = approvePayment(r.payment.id, {
+    const approved = await approvePayment(r.payment.id, {
       policy: POLICY,
       wallet: wallet(),
       intent,
@@ -109,8 +116,7 @@ describe('執行層', () => {
 
   // --- 回歸測試 1：伺服器重啟 ---
 
-  it('伺服器重啟後稽核鏈要接得回去，不是假性斷裂', () => {
-    // 先寫幾筆，模擬重啟前
+  it('伺服器重啟後稽核鏈要接得回去，不是假性斷裂', async () => {
     for (let i = 0; i < 3; i++) {
       write({ type: 'intent.received', actor: 'elder', summary: `重啟前第 ${i + 1} 筆`, details: {} });
     }
@@ -127,16 +133,15 @@ describe('執行層', () => {
     expect(verifyChain(events)).toEqual({ ok: true, length: 4 });
   });
 
-  it('檔案被改壞的話，重啟接回去仍然看得見那個斷點', () => {
+  it('檔案被改壞的話，重啟接回去仍然看得見那個斷點', async () => {
     for (let i = 0; i < 3; i++) {
       write({ type: 'intent.received', actor: 'elder', summary: `第 ${i + 1} 筆`, details: {} });
     }
 
-    // 手動改掉第 2 筆，然後模擬重啟
     const path = process.env.GUARDIAN_AUDIT_FILE!;
     const lines = readAuditFile().events;
     lines[1] = { ...lines[1], summary: '被改過' };
-    writeFileSync(path, lines.map((e) => JSON.stringify(e)).join('\n') + '\n');
+    writeFileSync(path, `${lines.map((e) => JSON.stringify(e)).join('\n')}\n`);
     state().audit.length = 0;
 
     write({ type: 'intent.received', actor: 'elder', summary: '重啟後第一筆', details: {} });
@@ -150,18 +155,24 @@ describe('執行層', () => {
 
   // --- 回歸測試 2：沒有收款地址不可核准 ---
 
-  it('名單裡對不到的收款人，付款不可核准 —— 否則錢會付到零地址', () => {
+  it('名單裡對不到的收款人，付款不可核准 —— 否則錢會付到零地址', async () => {
     const intent = intentFor({ payeeName: '好棒棒旅行社', amount: 1500 });
-    const r = executeIntent({ intent, policy: POLICY, wallet: wallet(), payee: undefined, now: NOW });
+    const r = await executeIntent({
+      intent,
+      policy: POLICY,
+      wallet: wallet(),
+      payee: undefined,
+      now: NOW,
+    });
 
     expect(r.decision.rulesHit).toContain('PAYEE_UNKNOWN');
     expect(r.payment.status).toBe('pending_approval');
     expect(r.payment.payee.address).toMatch(/^0x0{40}$/);
 
     state().intents.push(intent);
-    expect(() =>
+    await expect(
       approvePayment(r.payment.id, { policy: POLICY, wallet: wallet(), intent, now: NOW }),
-    ).toThrow('還沒有收款地址');
+    ).rejects.toThrow('還沒有收款地址');
 
     // 而且狀態沒有被動到
     expect(state().payments.find((p) => p.id === r.payment.id)!.status).toBe('pending_approval');
@@ -169,33 +180,47 @@ describe('執行層', () => {
 
   // --- 回歸測試 3：核准時鏈別要對得上 ---
 
-  it('提案與核准之間換了鏈，核准要被擋下來', () => {
+  it('提案與核准之間換了鏈，核准要被擋下來', async () => {
     const intent = intentFor({ amount: 2500 });
-    const r = executeIntent({ intent, policy: POLICY, wallet: wallet(), payee: TAIPOWER, now: NOW });
+    const r = await executeIntent({
+      intent,
+      policy: POLICY,
+      wallet: wallet(),
+      payee: TAIPOWER,
+      now: NOW,
+    });
     expect(r.payment.status).toBe('pending_approval');
 
-    state().intents.push({ ...intent, assetNetwork: 'tTWD@eip155:999999' });
-    expect(() =>
+    const elsewhere = { ...intent, assetNetwork: 'tTWD@eip155:999999' };
+    state().intents.push(elsewhere);
+
+    await expect(
       approvePayment(r.payment.id, {
         policy: POLICY,
         wallet: wallet(),
-        intent: { ...intent, assetNetwork: 'tTWD@eip155:999999' },
+        intent: elsewhere,
         now: NOW,
       }),
-    ).toThrow('不是同一條鏈');
+    ).rejects.toThrow('不是同一條鏈');
   });
 
   // --- 已經付過的不會再付 ---
 
-  it('同一把冪等鍵再送一次 → block，而且不會產生第二筆付款', () => {
+  it('同一把冪等鍵再送一次 → block，而且不會產生第二筆付款', async () => {
     const intent = intentFor();
     const w = wallet();
-    executeIntent({ intent, policy: POLICY, wallet: w, payee: TAIPOWER, now: NOW });
+    await executeIntent({ intent, policy: POLICY, wallet: w, payee: TAIPOWER, now: NOW });
 
-    const second = executeIntent({ intent, policy: POLICY, wallet: w, payee: TAIPOWER, now: NOW });
+    const second = await executeIntent({
+      intent,
+      policy: POLICY,
+      wallet: w,
+      payee: TAIPOWER,
+      now: NOW,
+    });
     expect(second.decision.action).toBe('block');
     expect(second.decision.rulesHit).toContain('ALREADY_SETTLED');
     expect(second.payment.status).toBe('blocked');
-    expect(w.spentToday(NOW)).toBe(1200); // 只扣過一次
+    expect(await w.spentToday(NOW)).toBe(1200); // 只扣過一次
   });
 });

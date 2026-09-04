@@ -37,10 +37,13 @@ const config: HardhatUserConfig = {
       accounts: { mnemonic: HARDHAT_MNEMONIC, count: 20 },
     },
 
-    // `npm run chain:node` 起的常駐節點，舞台 demo 走這條，不吃現場網路
+    // `npm run chain:node` 起的常駐節點，舞台 demo 走這條，不吃現場網路。
+    //
+    // 連接埠不是 Hardhat 預設的 8545：這台 Windows 把 8499–8598 整段保留給 Hyper-V，
+    // 綁上去會拿到 EACCES。換到 8645，用 netsh 確認過不在任何排除範圍內。
     localhost: {
       type: 'http',
-      url: 'http://127.0.0.1:8545',
+      url: process.env.LOCAL_RPC_URL ?? 'http://127.0.0.1:8645',
       accounts: { mnemonic: HARDHAT_MNEMONIC, count: 20 },
     },
 

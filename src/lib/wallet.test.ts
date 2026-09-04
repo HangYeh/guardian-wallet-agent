@@ -39,147 +39,147 @@ function key(n: number): `0x${string}` {
   return `0x${n.toString(16).padStart(64, '0')}`;
 }
 
-beforeEach(() => {
+beforeEach(async () => {
   wallet = new MockWallet(POLICY);
-  wallet.reset();
+  await wallet.reset();
 });
 
 describe('mock 錢包（= 合約六道 require 的規格）', () => {
-  it('一般付款成功，餘額與日累計都動了', () => {
-    const before = wallet.balance();
-    const r = wallet.pay({ payee: OK, amount: 1200, memoHash: key(1), expiresAt: FUTURE }, NOW);
+  it('一般付款成功，餘額與日累計都動了', async () => {
+    const before = await wallet.balance();
+    const r = await wallet.pay({ payee: OK, amount: 1200, memoHash: key(1), expiresAt: FUTURE }, NOW);
 
     expect(r.txHash).toMatch(/^0x[0-9a-f]{64}$/);
-    expect(wallet.balance()).toBe(before - 1200);
-    expect(wallet.spentToday(NOW)).toBe(1200);
+    expect(await wallet.balance()).toBe(before - 1200);
+    expect(await wallet.spentToday(NOW)).toBe(1200);
   });
 
-  it('過期的意圖付不出去', () => {
+  it('過期的意圖付不出去', async () => {
     const expired = new Date('2026-09-04T05:00:00.000Z').toISOString();
-    expect(() =>
+    await expect(
       wallet.pay({ payee: OK, amount: 1200, memoHash: key(2), expiresAt: expired }, NOW),
-    ).toThrow('PolicyViolation: intent expired');
+    ).rejects.toThrow('PolicyViolation: intent expired');
   });
 
-  it('同一把冪等鍵付第二次會被擋 —— 逾時不等於可以再付一次', () => {
-    wallet.pay({ payee: OK, amount: 1200, memoHash: key(3), expiresAt: FUTURE }, NOW);
-    expect(() =>
+  it('同一把冪等鍵付第二次會被擋 —— 逾時不等於可以再付一次', async () => {
+    await wallet.pay({ payee: OK, amount: 1200, memoHash: key(3), expiresAt: FUTURE }, NOW);
+    await expect(
       wallet.pay({ payee: OK, amount: 1200, memoHash: key(3), expiresAt: FUTURE }, NOW),
-    ).toThrow('Replay: intent already settled');
+    ).rejects.toThrow('Replay: intent already settled');
     // 只扣了一次
-    expect(wallet.spentToday(NOW)).toBe(1200);
+    expect(await wallet.spentToday(NOW)).toBe(1200);
   });
 
-  it('不在白名單的收款人付不出去', () => {
-    expect(() =>
+  it('不在白名單的收款人付不出去', async () => {
+    await expect(
       wallet.pay({ payee: BAD, amount: 500, memoHash: key(4), expiresAt: FUTURE }, NOW),
-    ).toThrow('PolicyViolation: payee not allowlisted');
+    ).rejects.toThrow('PolicyViolation: payee not allowlisted');
   });
 
-  it('超過單筆上限付不出去', () => {
-    expect(() =>
+  it('超過單筆上限付不出去', async () => {
+    await expect(
       wallet.pay({ payee: OK, amount: 50_000, memoHash: key(5), expiresAt: FUTURE }, NOW),
-    ).toThrow('PolicyViolation: per-tx cap exceeded');
+    ).rejects.toThrow('PolicyViolation: per-tx cap exceeded');
   });
 
-  it('超過核准門檻要走核准那條路', () => {
-    expect(() =>
+  it('超過核准門檻要走核准那條路', async () => {
+    await expect(
       wallet.pay({ payee: OK, amount: 2500, memoHash: key(6), expiresAt: FUTURE }, NOW),
-    ).toThrow('PolicyViolation: guardian approval required');
+    ).rejects.toThrow('PolicyViolation: guardian approval required');
 
     // 核准之後同一筆就過得去 —— 跳過的只有門檻那一道
-    const r = wallet.pay(
+    const r = await wallet.pay(
       { payee: OK, amount: 2500, memoHash: key(6), expiresAt: FUTURE, approved: true },
       NOW,
     );
     expect(r.txHash).toBeTruthy();
   });
 
-  it('核准就是白名單的授權來源：新收款人核准後付得出去', () => {
+  it('核准就是白名單的授權來源：新收款人核准後付得出去', async () => {
     // 「新收款人一律要家人點頭」是設計本意。家人點頭這個動作本身就是授權，
     // 否則新收款人永遠付不出去 —— 幕三的紅包就會卡死在這裡。
-    expect(() =>
+    await expect(
       wallet.pay({ payee: BAD, amount: 100, memoHash: key(7), expiresAt: FUTURE }, NOW),
-    ).toThrow('PolicyViolation: payee not allowlisted');
+    ).rejects.toThrow('PolicyViolation: payee not allowlisted');
 
-    const r = wallet.pay(
+    const r = await wallet.pay(
       { payee: BAD, amount: 100, memoHash: key(7), expiresAt: FUTURE, approved: true },
       NOW,
     );
     expect(r.txHash).toBeTruthy();
   });
 
-  it('核准繞不過單筆上限、效期、防重放、單日上限', () => {
+  it('核准繞不過單筆上限、效期、防重放、單日上限', async () => {
     // 家人能同意一筆付款，不能解除長期的硬上限。要那樣得去改政策。
-    expect(() =>
+    await expect(
       wallet.pay(
         { payee: OK, amount: 50_000, memoHash: key(8), expiresAt: FUTURE, approved: true },
         NOW,
       ),
-    ).toThrow('PolicyViolation: per-tx cap exceeded');
+    ).rejects.toThrow('PolicyViolation: per-tx cap exceeded');
 
     const expired = new Date('2026-09-04T05:00:00.000Z').toISOString();
-    expect(() =>
+    await expect(
       wallet.pay(
         { payee: OK, amount: 100, memoHash: key(15), expiresAt: expired, approved: true },
         NOW,
       ),
-    ).toThrow('PolicyViolation: intent expired');
+    ).rejects.toThrow('PolicyViolation: intent expired');
 
-    wallet.pay({ payee: OK, amount: 100, memoHash: key(16), expiresAt: FUTURE, approved: true }, NOW);
-    expect(() =>
+    await wallet.pay({ payee: OK, amount: 100, memoHash: key(16), expiresAt: FUTURE, approved: true }, NOW);
+    await expect(
       wallet.pay({ payee: OK, amount: 100, memoHash: key(16), expiresAt: FUTURE, approved: true }, NOW),
-    ).toThrow('Replay: intent already settled');
+    ).rejects.toThrow('Replay: intent already settled');
 
     // 這裡已經付掉 100；再付 2,900 湊到 3,000，接著 2,500 就會撞單日上限 5,000
-    wallet.pay({ payee: OK, amount: 2_900, memoHash: key(17), expiresAt: FUTURE, approved: true }, NOW);
-    expect(wallet.spentToday(NOW)).toBe(3_000);
-    expect(() =>
+    await wallet.pay({ payee: OK, amount: 2_900, memoHash: key(17), expiresAt: FUTURE, approved: true }, NOW);
+    expect(await wallet.spentToday(NOW)).toBe(3_000);
+    await expect(
       wallet.pay(
         { payee: OK, amount: 2_500, memoHash: key(18), expiresAt: FUTURE, approved: true },
         NOW,
       ),
-    ).toThrow('PolicyViolation: daily cap exceeded');
+    ).rejects.toThrow('PolicyViolation: daily cap exceeded');
   });
 
-  it('單日上限是累計的', () => {
-    wallet.pay({ payee: OK, amount: 2000, memoHash: key(9), expiresAt: FUTURE }, NOW);
-    wallet.pay({ payee: OK, amount: 2000, memoHash: key(10), expiresAt: FUTURE }, NOW);
-    expect(wallet.spentToday(NOW)).toBe(4000);
+  it('單日上限是累計的', async () => {
+    await wallet.pay({ payee: OK, amount: 2000, memoHash: key(9), expiresAt: FUTURE }, NOW);
+    await wallet.pay({ payee: OK, amount: 2000, memoHash: key(10), expiresAt: FUTURE }, NOW);
+    expect(await wallet.spentToday(NOW)).toBe(4000);
 
-    expect(() =>
+    await expect(
       wallet.pay({ payee: OK, amount: 2000, memoHash: key(11), expiresAt: FUTURE }, NOW),
-    ).toThrow('PolicyViolation: daily cap exceeded');
+    ).rejects.toThrow('PolicyViolation: daily cap exceeded');
   });
 
-  it('隔天日累計歸零', () => {
-    wallet.pay({ payee: OK, amount: 2000, memoHash: key(12), expiresAt: FUTURE }, NOW);
+  it('隔天日累計歸零', async () => {
+    await wallet.pay({ payee: OK, amount: 2000, memoHash: key(12), expiresAt: FUTURE }, NOW);
     const tomorrow = new Date(NOW.getTime() + 86_400_000);
-    expect(wallet.spentToday(tomorrow)).toBe(0);
+    expect(await wallet.spentToday(tomorrow)).toBe(0);
   });
 
   // --- 與 Solidity 的一個刻意差異 ---
 
-  it('被擋下來的付款不會把冪等鍵燒掉', () => {
+  it('被擋下來的付款不會把冪等鍵燒掉', async () => {
     // Solidity 的 revert 會回滾 usedIntent 的寫入；JavaScript 沒有回滾，
     // 所以 mock 改成成功之後才記。否則使用者修好問題重送會被誤判成重放。
-    expect(() =>
+    await expect(
       wallet.pay({ payee: OK, amount: 50_000, memoHash: key(13), expiresAt: FUTURE }, NOW),
-    ).toThrow(PolicyViolation);
-    expect(wallet.isSettled(key(13))).toBe(false);
+    ).rejects.toThrow(PolicyViolation);
+    expect(await wallet.isSettled(key(13))).toBe(false);
 
     // 金額改對之後同一把鍵付得出去
-    const r = wallet.pay({ payee: OK, amount: 1500, memoHash: key(13), expiresAt: FUTURE }, NOW);
+    const r = await wallet.pay({ payee: OK, amount: 1500, memoHash: key(13), expiresAt: FUTURE }, NOW);
     expect(r.txHash).toBeTruthy();
-    expect(wallet.isSettled(key(13))).toBe(true);
+    expect(await wallet.isSettled(key(13))).toBe(true);
   });
 
-  it('餘額不夠就是付不出去', () => {
+  it('餘額不夠就是付不出去', async () => {
     const big: Policy = { ...POLICY, perTxCap: 1_000_000, dailyCap: 1_000_000, approvalThreshold: 1_000_000 };
     const w = new MockWallet(big);
-    w.reset();
-    expect(() =>
+    await w.reset();
+    await expect(
       w.pay({ payee: OK, amount: 999_999, memoHash: key(14), expiresAt: FUTURE }, NOW),
-    ).toThrow('transfer failed');
+    ).rejects.toThrow('transfer failed');
   });
 });

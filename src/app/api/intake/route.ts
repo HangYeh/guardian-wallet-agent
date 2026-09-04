@@ -246,7 +246,7 @@ async function runPipeline(resolved: Resolved, body: IntakeBody, runId: string) 
   //
   // 風險引擎還沒接（M4.x），所以 risk 目前一律是預設的 low。
   // 這件事要在畫面上講清楚，不能讓人以為詐騙偵測已經在跑了。
-  const { decision, payment } = executeIntent({
+  const { decision, payment } = await executeIntent({
     intent,
     policy: demo.policy,
     wallet: walletFor(demo.policy),

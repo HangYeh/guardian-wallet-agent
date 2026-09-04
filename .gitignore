@@ -23,7 +23,8 @@ next-env.d.ts
 chain/artifacts/
 chain/cache/
 chain/typechain-types/
-chain/deployments/local.json
+chain/deployments/localhost.json
+chain/deployments/hardhat.json
 
 # runtime data
 data/

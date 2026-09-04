@@ -150,7 +150,8 @@ describe('GuardedWallet', () => {
     await viem.assertions.emit(tx, wallet, 'PaymentExecuted');
     assert.equal(await token.read.balanceOf([payee.account.address]), 2500n);
 
-    const p = await wallet.read.proposals([0n]);
+    // proposals() 回傳 tuple：payee, amount, memoHash, expiresAt, reason, status, createdAt
+    const p = (await wallet.read.proposals([0n])) as readonly unknown[];
     assert.equal(p[5], 3); // Status.Executed
   });
 

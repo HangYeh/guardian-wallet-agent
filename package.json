@@ -12,9 +12,12 @@
     "typecheck": "tsc --noEmit",
     "chain:compile": "cd chain && npx hardhat compile",
     "chain:test": "cd chain && npx hardhat test",
-    "chain:node": "cd chain && npx hardhat node",
+    "chain:node": "cd chain && npx hardhat node --port 8645",
     "chain:clean": "cd chain && npx hardhat clean",
-    "scan:secrets": "node scripts/scan-secrets.mjs"
+    "scan:secrets": "node scripts/scan-secrets.mjs",
+    "chain:deploy": "cd chain && npx hardhat run scripts/deploy.ts --network localhost",
+    "chain:deploy:testnet": "cd chain && npx hardhat run scripts/deploy.ts --network baseSepolia",
+    "chain:typecheck": "cd chain && npx tsc --noEmit"
   },
   "dependencies": {
     "next": "16.3.4",

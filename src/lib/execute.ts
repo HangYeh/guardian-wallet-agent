@@ -42,7 +42,7 @@ export type ExecuteResult = {
   events: AuditEvent[];
 };
 
-export function executeIntent(input: ExecuteInput): ExecuteResult {
+export async function executeIntent(input: ExecuteInput): Promise<ExecuteResult> {
   const now = input.now ?? new Date();
   const { intent, policy, wallet } = input;
 
@@ -54,8 +54,8 @@ export function executeIntent(input: ExecuteInput): ExecuteResult {
     payeeAddedAt: input.payeeAddedAt,
     now,
     // 這三個是執行層才知道的事實，政策自己不去問 —— 純函數不碰外面。
-    spentToday: wallet.spentToday(now),
-    alreadySettled: wallet.isSettled(intent.idempotencyKey),
+    spentToday: await wallet.spentToday(now),
+    alreadySettled: await wallet.isSettled(intent.idempotencyKey),
     chainAssetNetwork: assetNetworkFor(currentChainMode()),
   };
 
@@ -87,7 +87,7 @@ export function executeIntent(input: ExecuteInput): ExecuteResult {
 
   if (decision.action === 'auto') {
     try {
-      const receipt = wallet.pay(
+      const receipt = await wallet.pay(
         {
           payee: payment.payee,
           amount: payment.amount,
@@ -179,10 +179,10 @@ export function executeIntent(input: ExecuteInput): ExecuteResult {
  * 不跳過的：效期、防重放、單筆上限、單日上限、以及下面這兩道守衛。
  * 家人能同意一筆付款，不能解除長期的硬上限。
  */
-export function approvePayment(
+export async function approvePayment(
   paymentId: string,
   args: { policy: Policy; wallet: WalletAdapter; intent: PaymentIntent; now?: Date },
-): { payment: Payment; events: AuditEvent[] } {
+): Promise<{ payment: Payment; events: AuditEvent[] }> {
   const now = args.now ?? new Date();
   const payment = state().payments.find((p) => p.id === paymentId);
   if (!payment) throw new Error(`沒有這筆付款：${paymentId}`);
@@ -224,7 +224,7 @@ export function approvePayment(
   ];
 
   try {
-    const receipt = args.wallet.pay(
+    const receipt = await args.wallet.pay(
       {
         payee: payment.payee,
         amount: payment.amount,

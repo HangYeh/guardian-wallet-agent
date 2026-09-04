@@ -1,4 +1,6 @@
 import { keccak256, toBytes } from 'viem';
+import { currentChainMode } from '@/lib/intent';
+import { ChainWallet, loadDeployment } from '@/lib/wallet-chain';
 import type { ChainMode, Payee, Policy } from '@/lib/types';
 
 /**
@@ -44,13 +46,17 @@ export class PolicyViolation extends Error {
   }
 }
 
+/**
+ * 三種實作共用的介面。全部非同步，因為鏈上實作沒辦法是同步的 ——
+ * 讓 mock 也非同步，上層的程式碼在三種模式下就是同一份，不用分支。
+ */
 export interface WalletAdapter {
   readonly mode: ChainMode;
-  balance(): number;
-  spentToday(now?: Date): number;
-  isSettled(memoHash: `0x${string}`): boolean;
-  pay(args: PayArgs, now?: Date): PayReceipt;
-  reset(): void;
+  balance(): Promise<number>;
+  spentToday(now?: Date): Promise<number>;
+  isSettled(memoHash: `0x${string}`): Promise<boolean>;
+  pay(args: PayArgs, now?: Date): Promise<PayReceipt>;
+  reset(): Promise<void>;
 }
 
 // ---------------------------------------------------------------------------
@@ -83,15 +89,15 @@ export class MockWallet implements WalletAdapter {
 
   constructor(private readonly policy: Policy) {}
 
-  balance(): number {
+  async balance(): Promise<number> {
     return g.__guardianWallet!.balance;
   }
 
-  spentToday(now: Date = new Date()): number {
+  async spentToday(now: Date = new Date()): Promise<number> {
     return g.__guardianWallet!.spentByDay.get(dayIndex(now)) ?? 0;
   }
 
-  isSettled(memoHash: `0x${string}`): boolean {
+  async isSettled(memoHash: `0x${string}`): Promise<boolean> {
     return g.__guardianWallet!.usedIntent.has(memoHash);
   }
 
@@ -106,7 +112,7 @@ export class MockWallet implements WalletAdapter {
    * 所以這裡改成**成功之後才記**——否則一筆被擋下來的付款會把鍵燒掉，
    * 使用者修好問題重送反而被當成重放。
    */
-  pay(args: PayArgs, now: Date = new Date()): PayReceipt {
+  async pay(args: PayArgs, now: Date = new Date()): Promise<PayReceipt> {
     const s = g.__guardianWallet!;
 
     if (new Date(args.expiresAt).getTime() < now.getTime()) {
@@ -145,12 +151,32 @@ export class MockWallet implements WalletAdapter {
     };
   }
 
-  reset(): void {
+  async reset(): Promise<void> {
     g.__guardianWallet = emptyState();
   }
 }
 
-/** 目前這個行程要用哪一種 adapter。M3.4 之前只有 mock。 */
+/**
+ * 依 `CHAIN_MODE` 挑實作。
+ *
+ * 沒部署過、或設定不全，就**明確地退回 mock 並說出來** —— 不是靜靜地當作沒事。
+ * 現場網路壞掉時要能一秒切回 mock，但畫面必須誠實顯示現在跑的是哪一種，
+ * 不能讓評審以為看到的是鏈上交易。
+ */
 export function walletFor(policy: Policy): WalletAdapter {
-  return new MockWallet(policy);
+  const mode = currentChainMode();
+  if (mode === 'mock') return new MockWallet(policy);
+
+  const deployment = loadDeployment(mode);
+  if (!deployment) {
+    console.warn(`[wallet] CHAIN_MODE=${mode} 但找不到部署位址，退回 mock`);
+    return new MockWallet(policy);
+  }
+
+  try {
+    return new ChainWallet(mode, deployment);
+  } catch (err) {
+    console.warn(`[wallet] 連不上鏈（${err instanceof Error ? err.message : err}），退回 mock`);
+    return new MockWallet(policy);
+  }
 }
