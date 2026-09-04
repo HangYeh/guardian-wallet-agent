@@ -216,11 +216,13 @@ export type Transaction = {
 
 export type PendingBill = {
   id: string;
+  payeeId?: string;
   merchant: string;
   amount: number;
   dueDate: string;
   category: string;
   status: 'unpaid' | 'paid';
+  image?: string; // demo-data 內的檔名，幕一用
 };
 
 export type FindingType =
@@ -279,14 +281,53 @@ export type DemoScenario = {
   };
 };
 
+export type DemoPersona = {
+  elder: { name: string; age: number };
+  guardian: { name: string; relation: string };
+};
+
+/** 模擬的 165 高風險帳戶名單。真實版接打詐儀錶板開放資料。 */
+export type BlocklistEntry = {
+  account: string;
+  source: string;
+  note: string;
+};
+
+export type DemoMessage = {
+  id: string;
+  type: 'scam' | 'legit';
+  from: string;
+  text: string;
+  receivedAt: string;
+};
+
+/** 收款人最後使用時間，殭屍訂閱規則要用。 */
+export type UsageRecord = {
+  payeeId: string;
+  lastUsed: string;
+};
+
+/**
+ * 四幕跑完後週報應該顯示的數字。`guardedTotal` 是頭條。
+ * 調價只報不加總（錢還沒真的省下來，要家人去談），所以不計入 guardedTotal。
+ */
+export type ExpectedReport = {
+  blockedScam: number;
+  duplicateRefund: number;
+  zombieCancel: number;
+  priceHikeDelta: number;
+  guardedTotal: number;
+};
+
 export type DemoData = {
-  persona: { elder: string; guardian: string; relation: string };
+  persona: DemoPersona;
   policy: Policy;
   payees: Payee[];
-  blocklist: string[];
+  blocklist: BlocklistEntry[];
   transactions: Transaction[];
+  usage: UsageRecord[];
   pendingBills: PendingBill[];
-  messages: { id: string; from: string; text: string; receivedAt: string }[];
+  messages: DemoMessage[];
   scenarios: DemoScenario[];
-  expectedReport: { guardedTotal: number };
+  expectedReport: ExpectedReport;
 };
