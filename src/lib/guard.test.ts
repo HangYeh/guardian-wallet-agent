@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { checkGuardian, sameOriginOrToken } from '@/lib/guardian-auth';
+import { checkGuardian, sameOriginOrToken, sameSiteOnly } from '@/lib/guardian-auth';
 import { LIMITS, checkRate, rateGuard, resetRateLimits } from '@/lib/rate-limit';
 
 /**
@@ -25,6 +25,29 @@ beforeEach(() => {
 afterEach(() => {
   if (ORIGINAL === undefined) delete process.env.GUARDIAN_TOKEN;
   else process.env.GUARDIAN_TOKEN = ORIGINAL;
+  delete process.env.TRUST_PROXY;
+});
+
+describe('跨站守衛（CSRF）', () => {
+  it('瀏覽器從別的網站發過來 → 403', () => {
+    const r = sameSiteOnly(req({ 'sec-fetch-site': 'cross-site', host: 'localhost:3000' }));
+    expect(r.ok).toBe(false);
+    if (r.ok) throw new Error('unreachable');
+    expect(r.status).toBe(403);
+  });
+
+  it('Origin 對不上 Host → 擋；壞掉的 Origin（例如 "null"）也擋', () => {
+    expect(sameSiteOnly(req({ origin: 'http://evil.example', host: 'localhost:3000' })).ok).toBe(false);
+    expect(sameSiteOnly(req({ origin: 'null', host: 'localhost:3000' })).ok).toBe(false);
+  });
+
+  it('同源、直接在網址列打開、curl 都放行 —— 擋的是跳板，不是腳本', () => {
+    expect(
+      sameSiteOnly(req({ 'sec-fetch-site': 'same-origin', origin: 'http://localhost:3000', host: 'localhost:3000' })).ok,
+    ).toBe(true);
+    expect(sameSiteOnly(req({ 'sec-fetch-site': 'none', host: 'localhost:3000' })).ok).toBe(true);
+    expect(sameSiteOnly(req()).ok).toBe(true);
+  });
 });
 
 describe('守護者 token', () => {
@@ -104,7 +127,17 @@ describe('限流', () => {
     expect(checkRate(req(), 'guardian').ok).toBe(true);
   });
 
-  it('不同來源 IP 各算各的', () => {
+  it('沒設 TRUST_PROXY 時 x-forwarded-for 不算數 —— 那是呼叫端自己填的', () => {
+    const a = () => req({ 'x-forwarded-for': '10.0.0.1' });
+    const b = () => req({ 'x-forwarded-for': '10.0.0.2' });
+    for (let i = 0; i < LIMITS.intake.max; i++) checkRate(a(), 'intake');
+    expect(checkRate(a(), 'intake').ok).toBe(false);
+    // 換個假 IP 也不會拿到新的一桶
+    expect(checkRate(b(), 'intake').ok).toBe(false);
+  });
+
+  it('站在代理後面（TRUST_PROXY=true）時不同來源 IP 各算各的', () => {
+    process.env.TRUST_PROXY = 'true';
     const a = () => req({ 'x-forwarded-for': '10.0.0.1' });
     const b = () => req({ 'x-forwarded-for': '10.0.0.2' });
     for (let i = 0; i < LIMITS.intake.max; i++) checkRate(a(), 'intake');
@@ -133,6 +166,7 @@ describe('限流', () => {
   });
 
   it('計數器的鍵數有上限，不會無限長大', () => {
+    process.env.TRUST_PROXY = 'true';
     for (let i = 0; i < 800; i++) checkRate(req({ 'x-forwarded-for': `10.1.${i >> 8}.${i & 255}` }), 'intake');
     const g = globalThis as { __guardianRate?: Map<string, unknown> };
     expect(g.__guardianRate!.size).toBeLessThanOrEqual(500);

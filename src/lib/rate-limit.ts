@@ -42,11 +42,16 @@ export const LIMITS = {
 } satisfies Record<string, Limit>;
 
 function clientKey(request: Request): string {
+  // x-forwarded-for 是呼叫端自己填的。沒有反向代理幫忙覆寫時，信它等於讓每個人
+  // 自己決定要算在哪一桶 —— 每次換一個假 IP 就繞過整個限流。所以預設不信，
+  // 只有真的站在代理後面（TRUST_PROXY=true）才拿它分流。
+  if (process.env.TRUST_PROXY !== 'true') return 'no-proxy';
+
   const fwd = request.headers.get('x-forwarded-for');
   if (fwd) return fwd.split(',')[0]!.trim();
   const real = request.headers.get('x-real-ip');
   if (real) return real.trim();
-  // 沒有代理就拿不到 IP。退化成全站計數，這是刻意的，不是漏寫。
+  // 代理沒帶 IP。退化成全站計數，這是刻意的，不是漏寫。
   return 'no-proxy';
 }
 

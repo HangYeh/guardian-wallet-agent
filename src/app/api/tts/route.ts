@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { loadDemo } from '@/lib/demo';
+import { sameSiteOnly } from '@/lib/guardian-auth';
 import { rateGuard } from '@/lib/rate-limit';
 import { blockedAttempts, buildReport, executedPayments } from '@/lib/report';
 import { ELDER_ADDRESS, speechFor } from '@/lib/speech';
@@ -54,6 +55,10 @@ function weeklyText(): string {
 export async function POST(request: Request) {
   const limited = rateGuard(request, 'tts');
   if (limited) return limited;
+
+  // 別的網站不能借使用者的瀏覽器來燒我們的語音額度。
+  const site = sameSiteOnly(request);
+  if (!site.ok) return NextResponse.json({ ok: false, error: site.error }, { status: site.status });
 
   let body: Body;
   try {

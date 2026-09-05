@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { NextResponse } from 'next/server';
 import { newRunId, publish } from '@/lib/bus';
+import { sameSiteOnly } from '@/lib/guardian-auth';
 import { rateGuard } from '@/lib/rate-limit';
 import { assessRisk } from '@/lib/risk';
 import { loadDemo } from '@/lib/demo';
@@ -52,6 +53,9 @@ const MAX_INPUT_CHARS = 4000;
 /** 圖片上限（base64 字串長度，約等於 3 MB 原始檔）。手機拍的帳單遠低於這個數字。 */
 const MAX_IMAGE_CHARS = 4_000_000;
 
+/** 整個 body 的上限（bytes）。先看標頭再讀：不該把 100 MB 讀進記憶體之後才發現太大。 */
+const MAX_BODY_BYTES = 6_000_000;
+
 const IMAGE_DATA_URL = /^data:image\/(png|jpeg|jpg|webp);base64,[A-Za-z0-9+/=\s]+$/;
 
 /** 三種決策的中文說法。 */
@@ -76,6 +80,18 @@ export async function POST(request: Request) {
   const limited = rateGuard(request, 'intake');
   if (limited) return limited;
 
+  // 別的網站借使用者的瀏覽器來叫門神付款（CSRF）—— 擋在讀 body 之前。
+  const site = sameSiteOnly(request);
+  if (!site.ok) return NextResponse.json({ ok: false, error: site.error }, { status: site.status });
+
+  const declared = Number(request.headers.get('content-length') ?? 0);
+  if (declared > MAX_BODY_BYTES) {
+    return NextResponse.json(
+      { ok: false, error: `body 約 ${Math.round(declared / 1e6)} MB，超過上限 ${MAX_BODY_BYTES / 1e6} MB` },
+      { status: 413 },
+    );
+  }
+
   let body: IntakeBody;
   try {
     body = (await request.json()) as IntakeBody;
@@ -88,6 +104,10 @@ export async function POST(request: Request) {
 export async function GET(request: Request) {
   const limited = rateGuard(request, 'intake');
   if (limited) return limited;
+
+  // GET 也會付款，所以一樣不接受別的網站發起的請求（<img src=...> 那種）。
+  const site = sameSiteOnly(request);
+  if (!site.ok) return NextResponse.json({ ok: false, error: site.error }, { status: site.status });
 
   const q = new URL(request.url).searchParams;
   return intake({
@@ -408,6 +428,11 @@ function resolveInput(body: IntakeBody): Resolved | { error: string } {
 
   if (body.taskId && !TASK_ID_PATTERN.test(body.taskId)) {
     return { error: 'taskId 只能是 80 字元以內的英數與 . : - _' };
+  }
+
+  // source 會進稽核紀錄與畫面，只收我們認得的四種。
+  if (body.source !== undefined && (typeof body.source !== 'string' || !(body.source in SOURCE_LABEL))) {
+    return { error: `source 要是 ${Object.keys(SOURCE_LABEL).join(' / ')} 其中一個` };
   }
 
   if (body.image) {

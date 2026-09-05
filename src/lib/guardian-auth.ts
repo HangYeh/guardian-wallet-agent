@@ -76,6 +76,33 @@ export function sameOriginOrToken(request: Request): GuardCheck {
   };
 }
 
+/**
+ * 只擋「瀏覽器從別的網站發過來」的請求。
+ *
+ * 開著 demo 時若順手逛到一個惡意網頁，那個網頁可以叫瀏覽器對 127.0.0.1:3000 發請求
+ * （CSRF）：一個 `<img src="/api/intake?scenario=electricity">` 就能讓門神真的付一筆。
+ * 現代瀏覽器在跨站請求上一定會帶 `Sec-Fetch-Site: cross-site`；跨站的 POST 也會帶 Origin。
+ * curl、Node 腳本、直接在網址列打開都不會帶這些標頭，照常放行 —— 這道門擋的是
+ * 「使用者的瀏覽器被別人當跳板」，不是擋腳本。
+ */
+export function sameSiteOnly(request: Request): GuardCheck {
+  const reject: GuardCheck = { ok: false, status: 403, error: '這個端點不接受其他網站發起的請求' };
+
+  if (request.headers.get('sec-fetch-site') === 'cross-site') return reject;
+
+  const origin = request.headers.get('origin');
+  const host = request.headers.get('host');
+  if (origin && host) {
+    try {
+      if (new URL(origin).host !== host) return reject;
+    } catch {
+      // Origin 不是合法 URL（例如 "null"）：不知道是誰，就當外人
+      return reject;
+    }
+  }
+  return { ok: true };
+}
+
 function readToken(request: Request): string | undefined {
   const header = request.headers.get('x-guardian-token');
   if (header?.trim()) return header.trim();

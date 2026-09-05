@@ -441,7 +441,8 @@ npm run scan:secrets    # 掃工作目錄與 git 全歷史有沒有金鑰
 - 守護者動作（核准、拒絕、改政策、改白名單）與紅隊按鈕走 server action，`GUARDIAN_TOKEN` 從頭到尾不離開伺服器；API 版要帶 `x-guardian-token`。
 - 紅隊端點兩道守衛：`ENABLE_REDTEAM` 不是 true 就回 404，開了也要 token。
 - `/api/tts` 不收自由文字，只收「哪一筆」，任何能開首頁的人都拿不到我們的 ElevenLabs 額度。
-- 速率限制（每分鐘）：intake 20、guardian 60、events 60、tts 30、reset 10、redteam 10；intake 有 4,000 字輸入上限。
+- 速率限制（每分鐘）：intake 20、guardian 60、events 60、tts 30、reset 10、redteam 10；intake 有 4,000 字輸入上限，body 先看 `content-length`，超過 6 MB 不讀。限流預設不信任 `x-forwarded-for`（呼叫端自己填的），`TRUST_PROXY=true` 才用它分流。
+- `/api/intake` 與 `/api/tts` 拒絕瀏覽器從別的網站發起的請求（`Sec-Fetch-Site: cross-site`，或 Origin 對不上 Host）：開著 demo 時逛到惡意網頁，那個網頁不能借你的瀏覽器叫門神付款或燒語音額度。curl 與腳本不受影響。
 - 安全標頭：`nosniff`、`X-Frame-Options: DENY`、`Referrer-Policy`、`Permissions-Policy`（不開相機麥克風定位）；`npm run dev` 只綁 127.0.0.1。
 - `npm run scan:secrets` 掃工作目錄與 git 全歷史；`.gitignore` 第一段就是 `.env*`。
 - demo 資料的銀行代碼一律用未配發的 997 / 998 / 999、電話一律用不可能配發的號碼，`demo.test.ts` 有回歸測試把關。
