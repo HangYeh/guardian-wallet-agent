@@ -80,7 +80,7 @@ export default function ElderPage() {
       </div>
 
       <div className="todo mt-6">
-        拍帳單走視覺解析（M1.2），貼訊息走規則＋模型的合成風險（M4.2）。語音還沒接，走 M5.3。
+        拍帳單走視覺解析（M1.2），貼訊息走規則＋模型的合成風險（M4.2）。結果會用語音唸出來（M5.3，ElevenLabs；沒金鑰時放錄好的那幾句）。
         下面的數字全部讀自 <span className="mono">demo-data/guardian-demo.json</span>。
       </div>
     </main>
