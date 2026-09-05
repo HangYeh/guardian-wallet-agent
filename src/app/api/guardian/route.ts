@@ -3,7 +3,7 @@ import { approvePayment, rejectPayment } from '@/lib/execute';
 import { checkGuardian } from '@/lib/guardian-auth';
 import { rateGuard } from '@/lib/rate-limit';
 import { effectivePolicy, state } from '@/lib/store';
-import { walletFor } from '@/lib/wallet';
+import { guardianFor } from '@/lib/wallet';
 
 export const dynamic = 'force-dynamic';
 
@@ -57,7 +57,9 @@ export async function POST(request: Request) {
 
   try {
     if (body.action === 'reject') {
-      const { payment, events } = rejectPayment(body.paymentId);
+      const { payment, events } = await rejectPayment(body.paymentId, {
+        guardian: guardianFor(effectivePolicy()),
+      });
       return NextResponse.json({ ok: true, payment, events });
     }
 
@@ -69,8 +71,8 @@ export async function POST(request: Request) {
 
     const policy = effectivePolicy();
     const result = await approvePayment(body.paymentId, {
-      policy: policy,
-      wallet: walletFor(policy),
+      policy,
+      guardian: guardianFor(policy),
       intent,
     });
     return NextResponse.json({ ok: true, payment: result.payment, events: result.events });

@@ -5,12 +5,21 @@ import {
   createWalletClient,
   defineChain,
   http,
+  parseEventLogs,
   type Address,
   type PublicClient,
   type WalletClient,
 } from 'viem';
 import { mnemonicToAccount, privateKeyToAccount } from 'viem/accounts';
-import { PolicyViolation, dayIndex, type PayArgs, type PayReceipt, type WalletAdapter } from '@/lib/wallet';
+import {
+  PolicyViolation,
+  dayIndex,
+  type PayArgs,
+  type PayReceipt,
+  type ProposeArgs,
+  type ProposeReceipt,
+  type WalletAdapter,
+} from '@/lib/wallet';
 import type { ChainMode } from '@/lib/types';
 
 /**
@@ -22,7 +31,7 @@ import type { ChainMode } from '@/lib/types';
  */
 
 /** 本地鏈的標準助記詞，跟 hardhat.config.ts 同一組。這是公開的測試助記詞，不是祕密。 */
-const HARDHAT_MNEMONIC = 'test test test test test test test test test test test junk';
+export const HARDHAT_MNEMONIC = 'test test test test test test test test test test test junk';
 
 const LOCAL_RPC = process.env.LOCAL_RPC_URL ?? 'http://127.0.0.1:8645';
 
@@ -49,8 +58,25 @@ const baseSepolia = defineChain({
   testnet: true,
 });
 
-/** 只放 app 會呼叫到的部分。完整 ABI 在 chain/artifacts，那個目錄不進版控。 */
-const WALLET_ABI = [
+export function chainFor(mode: 'local' | 'testnet') {
+  return mode === 'testnet' ? baseSepolia : hardhatLocal;
+}
+
+export function rpcFor(mode: 'local' | 'testnet'): string {
+  return mode === 'testnet' ? (process.env.RPC_URL ?? 'https://sepolia.base.org') : LOCAL_RPC;
+}
+
+export function explorerUrlFor(mode: ChainMode, txHash: string): string | undefined {
+  if (mode !== 'testnet') return undefined;
+  const base = process.env.EXPLORER_BASE ?? 'https://sepolia.basescan.org';
+  return `${base}/tx/${txHash}`;
+}
+
+/**
+ * 只放 app 會呼叫到的部分。完整 ABI 在 chain/artifacts，那個目錄不進版控。
+ * `guardian-chain.ts` 也用這一份 —— 兩把鑰匙、同一份合約介面。
+ */
+export const WALLET_ABI = [
   {
     type: 'function',
     name: 'pay',
@@ -79,6 +105,34 @@ const WALLET_ABI = [
       { name: 'reason', type: 'string' },
     ],
     outputs: [{ name: 'proposalId', type: 'uint256' }],
+  },
+  {
+    type: 'function',
+    name: 'approve',
+    stateMutability: 'nonpayable',
+    inputs: [{ name: 'proposalId', type: 'uint256' }],
+    outputs: [],
+  },
+  {
+    type: 'function',
+    name: 'reject',
+    stateMutability: 'nonpayable',
+    inputs: [
+      { name: 'proposalId', type: 'uint256' },
+      { name: 'reason', type: 'string' },
+    ],
+    outputs: [],
+  },
+  {
+    type: 'event',
+    name: 'PaymentProposed',
+    inputs: [
+      { name: 'proposalId', type: 'uint256', indexed: true },
+      { name: 'payee', type: 'address', indexed: true },
+      { name: 'amount', type: 'uint256', indexed: false },
+      { name: 'memoHash', type: 'bytes32', indexed: true },
+      { name: 'reason', type: 'string', indexed: false },
+    ],
   },
   {
     type: 'function',
@@ -191,7 +245,7 @@ function operatorAccount(mode: ChainMode) {
  * viem 的錯誤訊息很長（含 calldata、gas、docs 連結），直接丟到畫面上是災難。
  * 我們只要那一句 require 字串 —— 那句話本來就是寫給人看的。
  */
-function toPolicyViolation(err: unknown): PolicyViolation {
+export function toPolicyViolation(err: unknown): PolicyViolation {
   const text = err instanceof Error ? `${err.message}` : String(err);
   const m =
     text.match(/reverted with the following reason:\s*\n?(.+)/) ??
@@ -211,8 +265,8 @@ export class ChainWallet implements WalletAdapter {
     this.mode = mode;
     this.deployment = deployment;
 
-    const chain = mode === 'testnet' ? baseSepolia : hardhatLocal;
-    const url = mode === 'testnet' ? (process.env.RPC_URL ?? 'https://sepolia.base.org') : LOCAL_RPC;
+    const chain = chainFor(mode);
+    const url = rpcFor(mode);
 
     this.publicClient = createPublicClient({ chain, transport: http(url) });
     this.walletClient = createWalletClient({
@@ -294,14 +348,58 @@ export class ChainWallet implements WalletAdapter {
    * 舞台上要乾淨的狀態就重跑一次部署（`npm run chain:deploy`），
    * 或者切回 mock 模式。這裡不假裝成功。
    */
+  /**
+   * 超出政策的付款改成鏈上提案。跟 `pay()` 一樣先模擬、送出、等收據。
+   *
+   * 提案編號**從事件讀**，不用模擬回傳的那個值：模擬到真正上鏈之間若有別筆先進去，
+   * 編號就不同了 —— 拿錯編號去核准，付出去的會是別人的提案。
+   */
+  async propose(args: ProposeArgs, now: Date = new Date()): Promise<ProposeReceipt> {
+    void now;
+    const account = this.walletClient.account!;
+
+    try {
+      const { request } = await this.publicClient.simulateContract({
+        address: this.deployment.wallet,
+        abi: WALLET_ABI,
+        functionName: 'propose',
+        args: [
+          args.payee.address,
+          BigInt(args.amount),
+          args.memoHash,
+          args.taskIdHash,
+          args.assetNetworkHash,
+          BigInt(Math.floor(new Date(args.expiresAt).getTime() / 1000)),
+          args.reason,
+        ],
+        account,
+      });
+
+      const txHash = await this.walletClient.writeContract(request);
+      const receipt = await this.publicClient.waitForTransactionReceipt({ hash: txHash });
+      if (receipt.status !== 'success') {
+        throw new PolicyViolation('交易被鏈上回退');
+      }
+
+      const logs = parseEventLogs({ abi: WALLET_ABI, eventName: 'PaymentProposed', logs: receipt.logs });
+      const id = (logs[0]?.args as { proposalId?: bigint } | undefined)?.proposalId;
+      if (id === undefined) {
+        throw new PolicyViolation('鏈上沒有回報提案編號（PaymentProposed 事件不見了）');
+      }
+
+      return { proposalId: Number(id), txHash, explorerUrl: this.explorerUrl(txHash) };
+    } catch (err) {
+      if (err instanceof PolicyViolation) throw err;
+      throw toPolicyViolation(err);
+    }
+  }
+
   async reset(): Promise<void> {
     // 刻意留空：呼叫端的一鍵重置只清鏈下狀態，不會誤以為鏈上也回到起點。
   }
 
   explorerUrl(txHash: string): string | undefined {
-    if (this.mode !== 'testnet') return undefined;
-    const base = process.env.EXPLORER_BASE ?? 'https://sepolia.basescan.org';
-    return `${base}/tx/${txHash}`;
+    return explorerUrlFor(this.mode, txHash);
   }
 
   get addresses(): Deployment {

@@ -144,7 +144,6 @@ describe('重置與 mock 錢包的接縫', () => {
       assetNetworkHash,
       memoHash: intentHash({ taskIdHash, payee: TAIPOWER.address, amount, assetNetworkHash }),
       expiresAt: new Date(Date.now() + 600_000).toISOString(),
-      approved: false,
     };
   }
 

@@ -2,7 +2,7 @@ import { appendEvent, persist, readAuditFile } from '@/lib/audit';
 import { assetNetworkFor, currentChainMode, intentHashParts } from '@/lib/intent';
 import { decide, type PolicyContext } from '@/lib/policy';
 import { state } from '@/lib/store';
-import { PolicyViolation, type WalletAdapter } from '@/lib/wallet';
+import { PolicyViolation, type GuardianAdapter, type WalletAdapter } from '@/lib/wallet';
 import type {
   AuditEvent,
   Payee,
@@ -132,26 +132,84 @@ export async function executeIntent(input: ExecuteInput): Promise<ExecuteResult>
       );
     }
   } else if (decision.action === 'hold') {
-    payment.status = 'pending_approval';
-    events.push(
-      write({
-        type: 'payment.proposed',
-        actor: 'agent',
-        intentId: intent.id,
-        paymentId: payment.id,
-        summary: `等家人核准：${payment.payee.name} ${payment.amount.toLocaleString('zh-TW')} 元`,
-        details: { rulesHit: decision.rulesHit, reason: decision.reason },
-        memoHash: payment.memoHash,
-      }, now),
-      write({
-        type: 'guardian.notified',
-        actor: 'agent',
-        intentId: intent.id,
-        paymentId: payment.id,
-        summary: `已通知${'守護者'}，附上原文與命中的規則`,
-        details: { rulesHit: decision.rulesHit },
-      }, now),
-    );
+    /*
+     * 提案要**真的送上鏈**（合約的 `propose`），家人之後核准的是那個提案編號。
+     *
+     * 9/5 之前這裡只改鏈下狀態，核准時再用 operator 的鑰匙呼叫 `pay()` ——
+     * 但合約的 `pay()` 一定查白名單，所以幕三的紅包在 local 模式會被
+     * `payee not allowlisted` 擋下。合約設計上讓 `approve()` 跳過白名單，
+     * 前提是先有一筆 `propose`。
+     *
+     * 零地址的收款人沒有東西可以提案（合約會 revert "payee is zero address"）：
+     * 那種付款留在鏈下等家人，但永遠不可核准 —— `approvePayment` 的守衛一擋著。
+     */
+    const proposable = !/^0x0{40}$/i.test(payment.payee.address);
+    let proposal: { proposalId: number; txHash?: string } | undefined;
+    let proposeError: string | undefined;
+
+    if (proposable) {
+      try {
+        proposal = await wallet.propose(
+          {
+            payee: payment.payee,
+            amount: payment.amount,
+            memoHash: payment.memoHash,
+            ...intentHashParts(intent),
+            expiresAt: intent.expiresAt,
+            reason: decision.reason,
+          },
+          now,
+        );
+        payment.proposalId = proposal.proposalId;
+      } catch (err) {
+        proposeError = err instanceof PolicyViolation ? err.message : String(err);
+      }
+    }
+
+    if (proposeError) {
+      // 連提案都被鏈上擋下，家人沒有東西可以核准。誠實記成失敗，不要留一筆
+      // 永遠核准不了的「等待核准」在畫面上。
+      payment.status = 'failed';
+      payment.revertReason = proposeError;
+      events.push(
+        write({
+          type: 'payment.reverted',
+          actor: 'chain',
+          intentId: intent.id,
+          paymentId: payment.id,
+          summary: `提案就被鏈上擋下：${proposeError}`,
+          details: { reason: proposeError, action: decision.action, rulesHit: decision.rulesHit },
+          memoHash: payment.memoHash,
+        }, now),
+      );
+    } else {
+      payment.status = 'pending_approval';
+      events.push(
+        write({
+          type: 'payment.proposed',
+          actor: 'agent',
+          intentId: intent.id,
+          paymentId: payment.id,
+          summary: `等家人核准：${payment.payee.name} ${payment.amount.toLocaleString('zh-TW')} 元`,
+          details: {
+            rulesHit: decision.rulesHit,
+            reason: decision.reason,
+            proposalId: proposal?.proposalId ?? null,
+            txHash: proposal?.txHash ?? null,
+            channel: wallet.mode,
+          },
+          memoHash: payment.memoHash,
+        }, now),
+        write({
+          type: 'guardian.notified',
+          actor: 'agent',
+          intentId: intent.id,
+          paymentId: payment.id,
+          summary: `已通知${'守護者'}，附上原文與命中的規則`,
+          details: { rulesHit: decision.rulesHit },
+        }, now),
+      );
+    }
   } else {
     payment.status = 'blocked';
     events.push(
@@ -182,7 +240,7 @@ export async function executeIntent(input: ExecuteInput): Promise<ExecuteResult>
  */
 export async function approvePayment(
   paymentId: string,
-  args: { policy: Policy; wallet: WalletAdapter; intent: PaymentIntent; now?: Date },
+  args: { policy: Policy; guardian: GuardianAdapter; intent: PaymentIntent; now?: Date },
 ): Promise<{ payment: Payment; events: AuditEvent[] }> {
   const now = args.now ?? new Date();
   const payment = state().payments.find((p) => p.id === paymentId);
@@ -212,6 +270,14 @@ export async function approvePayment(
     );
   }
 
+  // 守衛三：要有鏈上提案才有東西可以核准。
+  //
+  // 零地址那種本來就不會有（守衛一已擋）；走到這裡還沒有，代表提案當時就失敗了，
+  // 而那筆的狀態應該是 failed 不是 pending_approval —— 真的看到就是 bug。
+  if (payment.proposalId == null) {
+    throw new Error(`這筆付款沒有鏈上提案編號，無法核准（${payment.id}）`);
+  }
+
   const events: AuditEvent[] = [
     write({
       type: 'payment.approved',
@@ -225,17 +291,8 @@ export async function approvePayment(
   ];
 
   try {
-    const receipt = await args.wallet.pay(
-      {
-        payee: payment.payee,
-        amount: payment.amount,
-        memoHash: payment.memoHash,
-        ...intentHashParts(args.intent),
-        expiresAt: args.intent.expiresAt,
-        approved: true,
-      },
-      now,
-    );
+    // 家人的鑰匙呼叫合約的 approve(proposalId)：跳過白名單與門檻，其餘四道照舊。
+    const receipt = await args.guardian.approve(payment.proposalId, now);
     payment.status = 'executed';
     payment.txHash = receipt.txHash;
     payment.executedAt = now.toISOString();
@@ -247,7 +304,7 @@ export async function approvePayment(
         intentId: payment.intentId,
         paymentId: payment.id,
         summary: `核准後已繳 ${payment.payee.name} ${payment.amount.toLocaleString('zh-TW')} 元`,
-        details: { txHash: receipt.txHash, approvedBy: 'guardian' },
+        details: { txHash: receipt.txHash, approvedBy: 'guardian', proposalId: payment.proposalId },
         memoHash: payment.memoHash,
       }, now),
     );
@@ -272,9 +329,25 @@ export async function approvePayment(
   return { payment, events };
 }
 
-export function rejectPayment(paymentId: string, now: Date = new Date()) {
+export async function rejectPayment(
+  paymentId: string,
+  args: { guardian: GuardianAdapter; now?: Date; reason?: string },
+): Promise<{ payment: Payment; events: AuditEvent[] }> {
+  const now = args.now ?? new Date();
   const payment = state().payments.find((p) => p.id === paymentId);
   if (!payment) throw new Error(`沒有這筆付款：${paymentId}`);
+  if (payment.status !== 'pending_approval') {
+    throw new Error(`這筆付款的狀態是 ${payment.status}，不是等待核准`);
+  }
+
+  // 有鏈上提案就在鏈上拒絕 —— 合約會把那把冪等鍵燒掉，代理重送一次不能重新排隊。
+  // 沒有提案的（零地址那種）只改鏈下狀態。
+  let txHash: string | undefined;
+  if (payment.proposalId != null) {
+    const r = await args.guardian.reject(payment.proposalId, args.reason ?? '守護者拒絕', now);
+    txHash = r.txHash;
+  }
+
   payment.status = 'rejected';
   const events = [
     write({
@@ -283,7 +356,7 @@ export function rejectPayment(paymentId: string, now: Date = new Date()) {
       intentId: payment.intentId,
       paymentId: payment.id,
       summary: `守護者拒絕 ${payment.payee.name} ${payment.amount.toLocaleString('zh-TW')} 元`,
-      details: {},
+      details: { proposalId: payment.proposalId ?? null, txHash: txHash ?? null },
       memoHash: payment.memoHash,
     }, now),
   ];

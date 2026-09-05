@@ -117,7 +117,7 @@ describe('執行層', () => {
     state().intents.push(intent);
     const approved = await approvePayment(r.payment.id, {
       policy: POLICY,
-      wallet: wallet(),
+      guardian: wallet(),
       intent,
       now: NOW,
     });
@@ -202,7 +202,7 @@ describe('執行層', () => {
 
     state().intents.push(intent);
     await expect(
-      approvePayment(r.payment.id, { policy: POLICY, wallet: wallet(), intent, now: NOW }),
+      approvePayment(r.payment.id, { policy: POLICY, guardian: wallet(), intent, now: NOW }),
     ).rejects.toThrow('還沒有收款地址');
 
     // 而且狀態沒有被動到
@@ -228,7 +228,7 @@ describe('執行層', () => {
     await expect(
       approvePayment(r.payment.id, {
         policy: POLICY,
-        wallet: wallet(),
+        guardian: wallet(),
         intent: elsewhere,
         now: NOW,
       }),

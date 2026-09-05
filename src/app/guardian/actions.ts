@@ -3,7 +3,7 @@
 import { revalidatePath } from 'next/cache';
 import { approvePayment, rejectPayment, write } from '@/lib/execute';
 import { effectivePolicy, setAllowlisted, state, updatePolicy } from '@/lib/store';
-import { walletFor } from '@/lib/wallet';
+import { guardianFor } from '@/lib/wallet';
 import type { Policy } from '@/lib/types';
 
 /**
@@ -30,7 +30,7 @@ export async function approveAction(paymentId: string): Promise<ActionResult> {
     const policy = effectivePolicy();
     const result = await approvePayment(paymentId, {
       policy,
-      wallet: walletFor(policy),
+      guardian: guardianFor(policy),
       intent,
     });
 
@@ -48,7 +48,7 @@ export async function approveAction(paymentId: string): Promise<ActionResult> {
 
 export async function rejectAction(paymentId: string): Promise<ActionResult> {
   try {
-    const { payment } = rejectPayment(paymentId);
+    const { payment } = await rejectPayment(paymentId, { guardian: guardianFor(effectivePolicy()) });
     revalidatePath('/guardian');
     revalidatePath('/audit');
     return { ok: true, message: `已拒絕 ${payment.payee.name} 的 ${payment.amount} 元` };

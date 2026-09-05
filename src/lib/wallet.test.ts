@@ -59,7 +59,7 @@ const ASSET = 'tTWD@eip155:31337';
  * `n` 是任務代號的種子：同一個 n 配同一個 (payee, amount) 就是同一把鍵，
  * 防重放那幾條測試靠這個性質。
  */
-function pa(payee: Payee, amount: number, n: number, expiresAt = FUTURE, approved?: boolean): PayArgs {
+function pa(payee: Payee, amount: number, n: number, expiresAt = FUTURE): PayArgs {
   const taskIdHash = keccak256(toBytes(`task-${n}`));
   const assetNetworkHash = keccak256(toBytes(ASSET));
   return {
@@ -68,9 +68,19 @@ function pa(payee: Payee, amount: number, n: number, expiresAt = FUTURE, approve
     taskIdHash,
     assetNetworkHash,
     expiresAt,
-    approved,
     memoHash: intentHash({ taskIdHash, payee: payee.address, amount, assetNetworkHash }),
   };
+}
+
+/** 提案 = 付款參數 + 理由。 */
+function pr(payee: Payee, amount: number, n: number, expiresAt = FUTURE) {
+  return { ...pa(payee, amount, n, expiresAt), reason: '測試' };
+}
+
+/** 走家人核准那條路：propose → approve，回傳 approve 的收據。 */
+async function viaGuardian(payee: Payee, amount: number, n: number, expiresAt = FUTURE) {
+  const { proposalId } = await wallet.propose(pr(payee, amount, n, expiresAt), NOW);
+  return wallet.approve(proposalId, NOW);
 }
 
 beforeEach(async () => {
@@ -121,11 +131,8 @@ describe('mock 錢包（= 合約六道 require 的規格）', () => {
       wallet.pay(pa(OK, 2500, 6), NOW),
     ).rejects.toThrow('PolicyViolation: guardian approval required');
 
-    // 核准之後同一筆就過得去 —— 跳過的只有門檻那一道
-    const r = await wallet.pay(
-      pa(OK, 2500, 6, FUTURE, true),
-      NOW,
-    );
+    // 提案 → 家人核准，同一筆就過得去 —— 跳過的只有門檻那一道
+    const r = await viaGuardian(OK, 2500, 6);
     expect(r.txHash).toBeTruthy();
   });
 
@@ -136,43 +143,37 @@ describe('mock 錢包（= 合約六道 require 的規格）', () => {
       wallet.pay(pa(BAD, 100, 7), NOW),
     ).rejects.toThrow('PolicyViolation: payee not allowlisted');
 
-    const r = await wallet.pay(
-      pa(BAD, 100, 7, FUTURE, true),
-      NOW,
-    );
+    const r = await viaGuardian(BAD, 100, 7);
     expect(r.txHash).toBeTruthy();
   });
 
   it('核准繞不過單筆上限、效期、防重放、單日上限', async () => {
     // 家人能同意一筆付款，不能解除長期的硬上限。要那樣得去改政策。
-    await expect(
-      wallet.pay(
-        pa(OK, 50_000, 8, FUTURE, true),
-        NOW,
-      ),
-    ).rejects.toThrow('PolicyViolation: per-tx cap exceeded');
+    // 單筆上限：連提案都過不了（合約的 propose 就查了）
+    await expect(wallet.propose(pr(OK, 50_000, 8), NOW)).rejects.toThrow(
+      'PolicyViolation: per-tx cap exceeded',
+    );
 
-    const expired = new Date('2026-09-04T05:00:00.000Z').toISOString();
-    await expect(
-      wallet.pay(
-        pa(OK, 100, 15, expired, true),
-        NOW,
-      ),
-    ).rejects.toThrow('PolicyViolation: intent expired');
+    // 效期：提案時還沒過期、核准時過期了 —— 家人半夜醒來按下去也不會付出去
+    const soon = new Date(NOW.getTime() + 60_000).toISOString();
+    const { proposalId: p15 } = await wallet.propose(pr(OK, 100, 15, soon), NOW);
+    const later = new Date(NOW.getTime() + 120_000);
+    await expect(wallet.approve(p15, later)).rejects.toThrow('PolicyViolation: intent expired');
 
-    await wallet.pay(pa(OK, 100, 16, FUTURE, true), NOW);
-    await expect(
-      wallet.pay(pa(OK, 100, 16, FUTURE, true), NOW),
-    ).rejects.toThrow('Replay: intent already settled');
+    // 防重放：同一個提案核准兩次
+    const { proposalId: p16 } = await wallet.propose(pr(OK, 100, 16), NOW);
+    await wallet.approve(p16, NOW);
+    await expect(wallet.approve(p16, NOW)).rejects.toThrow('proposal is not pending');
+    // 同一把鍵再提案一次也不行
+    await expect(wallet.propose(pr(OK, 100, 16), NOW)).rejects.toThrow(
+      'Replay: intent already settled',
+    );
 
     // 這裡已經付掉 100；再付 2,900 湊到 3,000，接著 2,500 就會撞單日上限 5,000
-    await wallet.pay(pa(OK, 2_900, 17, FUTURE, true), NOW);
+    await viaGuardian(OK, 2_900, 17);
     expect(await wallet.spentToday(NOW)).toBe(3_000);
     await expect(
-      wallet.pay(
-        pa(OK, 2_500, 18, FUTURE, true),
-        NOW,
-      ),
+      viaGuardian(OK, 2_500, 18),
     ).rejects.toThrow('PolicyViolation: daily cap exceeded');
   });
 
