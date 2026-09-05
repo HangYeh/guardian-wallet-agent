@@ -2,7 +2,9 @@ import { AllowlistToggle, ApprovalButtons, PolicyForm } from '@/components/Guard
 import GuardianLive from '@/components/GuardianLive';
 import { loadDemo, formatTWD, payeeById } from '@/lib/demo';
 import { blockedAttempts } from '@/lib/report';
+import { currentChainMode } from '@/lib/intent';
 import { cooldownRemainingHours } from '@/lib/policy';
+import { detectDrift } from '@/lib/policy-drift';
 import { allowlistedAt, effectivePolicy, state } from '@/lib/store';
 
 export const dynamic = 'force-dynamic';
@@ -31,12 +33,15 @@ function hhmm(iso: string): string {
   });
 }
 
-export default function GuardianPage() {
+export default async function GuardianPage() {
   const demo = loadDemo();
   const { persona } = demo;
   // 讀「現在生效的」政策，不是劇本檔裡的原始值 —— 守護者改過就要看得到。
   const policy = effectivePolicy();
   const now = new Date();
+  // 合約那邊的政策讀出來對照。只偵測、不同步（9/5 決定），讀不到也不能讓頁面掛掉。
+  const chainMode = currentChainMode();
+  const drift = await detectDrift(chainMode, policy, demo.payees);
   const pending = state().payments.filter((p) => p.status === 'pending_approval');
   // 家人通知只列最近五則；再多就沒人看了。
   const alerts = blockedAttempts(state()).slice(0, 5);
@@ -212,6 +217,100 @@ export default function GuardianPage() {
         />
       </div>
 
+      {/**
+       * 鏈上合約 vs 鏈下政策。
+       *
+       * 上面的表單改的是記憶體裡的政策；合約裡的 `setPolicy` / `setAllowlist`
+       * 應用層從沒呼叫，部署當下的值之後就凍住。這張表把合約讀出來並排，
+       * 對不上就標紅、講後果 —— 只偵測不同步，因為「鏈下改成功、鏈上寫失敗」
+       * 那種半套狀態比明著漂移更難發現。
+       */}
+      <div className="mt-8 mb-3 flex items-baseline gap-3">
+        <h2 className="text-[1.05rem] font-bold">鏈上合約的政策</h2>
+        {drift.kind === 'ok' && (
+          <span
+            className="pill"
+            style={{ color: drift.report.driftCount === 0 ? 'var(--color-celadon)' : 'var(--color-cinnabar)' }}
+          >
+            {drift.report.driftCount === 0 ? '鏈上鏈下一致' : `${drift.report.driftCount} 處對不上`}
+          </span>
+        )}
+      </div>
+      {drift.kind === 'mock' ? (
+        <div className="card p-5 text-[0.88rem] text-[var(--color-ink-2)]">
+          現在是 <span className="mono">CHAIN_MODE=mock</span>，沒有合約，上面的政策就是全部。
+          切到 <span className="mono">local</span> 或 <span className="mono">testnet</span>，
+          這裡會把合約裡的上限與白名單讀出來對照。
+        </div>
+      ) : drift.kind === 'unreachable' ? (
+        <div
+          className="card p-5 text-[0.88rem]"
+          style={{ borderLeft: '6px solid var(--color-cinnabar)', background: 'var(--color-cinnabar-bg)' }}
+        >
+          <b>讀不到合約</b>：{drift.error}
+          <br />
+          鏈下政策照常生效，但鏈上是不是同一套，現在看不見。
+        </div>
+      ) : (
+        <div className="scroll-x card">
+          <table className="grid">
+            <thead>
+              <tr>
+                <th>項目</th><th className="num">鏈下（現在生效）</th><th className="num">鏈上（合約）</th><th>狀態</th>
+              </tr>
+            </thead>
+            <tbody>
+              {drift.report.rows.map((r) => {
+                const bad = r.drift !== 'none';
+                const show = (v: number | boolean) =>
+                  typeof v === 'boolean' ? (v ? '白名單' : '不在白名單') : formatTWD(v);
+                return (
+                  <tr key={r.key} style={bad ? { background: 'var(--color-cinnabar-bg)' } : undefined}>
+                    <td className="font-medium">
+                      {r.label}
+                      {r.kind === 'allowlist' && (
+                        <span className="ml-1.5 text-[0.75rem] text-[var(--color-ink-3)]">白名單</span>
+                      )}
+                    </td>
+                    <td className="num mono">{show(r.offchain)}</td>
+                    <td className="num mono">{show(r.onchain)}</td>
+                    <td>
+                      {bad ? (
+                        <>
+                          <span className="pill" style={{ color: 'var(--color-cinnabar)' }}>
+                            {r.drift === 'looser' ? '鏈下比鏈上寬' : '鏈下比鏈上嚴'}
+                          </span>
+                          <div className="mt-1 max-w-[48ch] text-[0.78rem] leading-relaxed">{r.consequence}</div>
+                        </>
+                      ) : (
+                        <span className="pill" style={{ color: 'var(--color-celadon)' }}>一致</span>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+              {drift.report.rows.every((r) => r.kind !== 'allowlist') && (
+                <tr>
+                  <td className="font-medium">
+                    收款人白名單
+                    <span className="ml-1.5 text-[0.75rem] text-[var(--color-ink-3)]">
+                      {drift.report.allowlistChecked} 個
+                    </span>
+                  </td>
+                  <td className="num mono">—</td>
+                  <td className="num mono">—</td>
+                  <td><span className="pill" style={{ color: 'var(--color-celadon)' }}>全部一致</span></td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+          <p className="px-4 pb-3 pt-2 text-[0.78rem] text-[var(--color-ink-2)]">
+            只偵測、不同步。鏈下改完是先擋的那一層，合約是底線；兩邊對不上時，
+            「鏈下比鏈上寬」那幾列才會真的出事 —— 引擎放行、鏈上 revert。
+          </p>
+        </div>
+      )}
+
       <h2 className="mt-8 mb-3 text-[1.05rem] font-bold">收款人</h2>
       <p className="page-sub">
         白名單上的收款人才可能被自動付款。其餘的一律要{persona.guardian.name}核准，
@@ -289,7 +388,8 @@ export default function GuardianPage() {
         <br />
         誠實的限制：這一頁本身沒有登入。現在靠的是 <span className="mono">npm run dev</span>{' '}
         預設只綁 localhost；真實產品要的是家人裝置上的 passkey 簽章，那在路線圖裡。
-        政策改動目前只在鏈下生效，寫進合約的 <span className="mono">setPolicy</span> 還沒接。
+        政策改動只在鏈下生效，合約的 <span className="mono">setPolicy</span> /{' '}
+        <span className="mono">setAllowlist</span> 沒接；上面「鏈上合約的政策」那張表把兩邊對照出來，對不上就標紅。
         {payeeById(demo, 'contact_xiaoyu') && ' 幕三會用到的孫子帳戶已經在收款人清單裡，但刻意不放白名單。'}
       </div>
     </main>

@@ -164,6 +164,13 @@ export const WALLET_ABI = [
   },
   {
     type: 'function',
+    name: 'allowlist',
+    stateMutability: 'view',
+    inputs: [{ type: 'address' }],
+    outputs: [{ type: 'bool' }],
+  },
+  {
+    type: 'function',
     name: 'policy',
     stateMutability: 'view',
     inputs: [],
