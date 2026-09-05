@@ -1,6 +1,8 @@
 import { auditFile, readAuditFile, verifyChain } from '@/lib/audit';
 import { loadDemo, formatTWD, spendByMerchant } from '@/lib/demo';
+import { SpeakButton } from '@/components/Speak';
 import { blockedAttempts, buildReport, executedPayments } from '@/lib/report';
+import { ELDER_ADDRESS } from '@/lib/speech';
 import { state } from '@/lib/store';
 import type { FindingType } from '@/lib/types';
 
@@ -42,6 +44,8 @@ export default function AuditPage() {
     pendingBills: demo.pendingBills,
     blocked: blockedAttempts(chain),
     executed: executedPayments(chain),
+    // 跟攔截畫面同一個稱呼：/api/tts 唸週報時也用它，字跟聲音才會是同一句。
+    address: ELDER_ADDRESS,
   });
 
   return (
@@ -86,13 +90,16 @@ export default function AuditPage() {
           </p>
         </div>
 
-        {/* 唸給長輩聽的版本。M5.3 會接語音；先把稿子攤在這裡，因為它是算出來的、不是寫死的。 */}
+        {/* 唸給長輩聽的版本。稿子攤在這裡是因為它是算出來的、不是寫死的；聲音由 /api/tts 現算或拿錄好的。 */}
         <div
           className="mt-4 p-4 text-[0.95rem] leading-relaxed"
           style={{ background: 'var(--color-surface-2)', borderLeft: '3px solid var(--color-celadon)' }}
         >
           <div className="label mb-1">唸給{demo.persona.elder.name}聽的版本</div>
           {report.narrative}
+          <div className="mt-3">
+            <SpeakButton request={{ kind: 'weekly' }} label={`唸給${demo.persona.elder.name}聽`} />
+          </div>
         </div>
       </div>
 

@@ -37,6 +37,8 @@ export const LIMITS = {
   guardian: { max: 60, windowMs: 60_000 },
   /** 連線數本身有上限（MAX_SUBSCRIBERS），這裡防的是反覆連斷。 */
   events: { max: 60, windowMs: 60_000 },
+  /** 沒錄過的句子會真的去跟 ElevenLabs 要，花的是額度；一分鐘三十句夠舞台用，不夠燒。 */
+  tts: { max: 30, windowMs: 60_000 },
 } satisfies Record<string, Limit>;
 
 function clientKey(request: Request): string {

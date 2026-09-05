@@ -1,6 +1,7 @@
 'use client';
 
 import { useRef, useState } from 'react';
+import { SpeakButton, useSpeech } from '@/components/Speak';
 
 /**
  * 阿嬤的操作台。三顆鍵，其他什麼都沒有。
@@ -22,6 +23,7 @@ type Fields = {
 };
 
 type Intent = {
+  id: string;
   taskId: string;
   resource: string;
   merchant: string;
@@ -80,6 +82,7 @@ type Result = {
   risk?: Risk;
   payment?: Payment;
   payee?: { id: string; name: string; allowlisted: boolean; address: string } | null;
+  speech?: { text: string } | null;
   trace?: TraceStep[];
   warnings?: string[];
 };
@@ -158,6 +161,8 @@ export default function ElderConsole() {
   const [busy, setBusy] = useState(false);
   const [elapsed, setElapsed] = useState(0);
   const [result, setResult] = useState<Result | null>(null);
+  // 第三顆鍵：唸這個月的週報。字是伺服器算的，這裡只負責按與放。
+  const weekly = useSpeech();
 
   async function send(body: Record<string, unknown>, previewUrl: string | null) {
     setBusy(true);
@@ -216,7 +221,16 @@ export default function ElderConsole() {
           disabled={busy}
           onClick={() => setPasting((v) => !v)}
         />
-        <BigKey icon="🔊" label="唸給我聽" hint="這個月的錢花到哪裡" cell="M5.3" />
+        <BigKey
+          icon="🔊"
+          label={
+            weekly.status === 'loading' ? '準備中……' : weekly.status === 'playing' ? '正在唸……' : '唸給我聽'
+          }
+          hint={weekly.note ?? '這個月的錢花到哪裡'}
+          active={weekly.status === 'playing'}
+          disabled={busy || weekly.status === 'loading'}
+          onClick={() => void weekly.speak({ kind: 'weekly' })}
+        />
       </div>
 
       <input
@@ -299,7 +313,13 @@ export default function ElderConsole() {
 
       {/* ---- 攔截畫面：擋下來的時候佔滿整個寬度，先出現在最上面 ---- */}
       {result?.ok && blocked && result.decision && (
-        <Verdict decision={result.decision} risk={result.risk} payment={result.payment} big />
+        <Verdict
+          decision={result.decision}
+          risk={result.risk}
+          payment={result.payment}
+          intentId={result.intent?.id}
+          big
+        />
       )}
 
       {result?.ok && f && i && (
@@ -313,7 +333,12 @@ export default function ElderConsole() {
 
           <div className={`flex flex-col gap-4 ${preview ? '' : 'lg:col-span-2'}`}>
             {!blocked && result.decision && (
-              <Verdict decision={result.decision} risk={result.risk} payment={result.payment} />
+              <Verdict
+                decision={result.decision}
+                risk={result.risk}
+                payment={result.payment}
+                intentId={result.intent?.id}
+              />
             )}
 
             {/* ---- 讀到什麼 ---- */}
@@ -484,11 +509,13 @@ function Verdict({
   decision,
   risk,
   payment,
+  intentId,
   big,
 }: {
   decision: Decision;
   risk?: Risk;
   payment?: Payment;
+  intentId?: string;
   big?: boolean;
 }) {
   const look = LOOK[decision.action];
@@ -526,10 +553,11 @@ function Verdict({
         {decision.reason}
       </p>
 
-      {big && (
-        <button type="button" disabled className="btn-quiet mt-4 cursor-not-allowed opacity-60">
-          🔊 唸給我聽（M5.3 接上）
-        </button>
+      {/* 結果一出來就唸一次（字已經在畫面上了，聲音是給看不清楚的人）；要再聽就按。 */}
+      {intentId && (
+        <div className={big ? 'mt-4' : 'mt-3'}>
+          <SpeakButton request={{ intentId }} autoplay big={big} />
+        </div>
       )}
 
       {risk && <Reasons risk={risk} big={big} />}

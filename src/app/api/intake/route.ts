@@ -10,6 +10,7 @@ import { walletFor } from '@/lib/wallet';
 import { buildIntent, currentChainMode, intentToTransaction } from '@/lib/intent';
 import { visionEnabled } from '@/lib/llm';
 import { matchPayee, parseImage, parseText, type ParseResult } from '@/lib/parser';
+import { speechFor } from '@/lib/speech';
 import { allowlistedAt, effectivePolicy, payeesInEffect, state } from '@/lib/store';
 import type { IntentSource, TraceStep } from '@/lib/types';
 
@@ -362,6 +363,15 @@ async function runPipeline(resolved: Resolved, body: IntakeBody, runId: string) 
     latencyMs: parsed.latencyMs,
     fallbackReason: parsed.fallbackReason,
     chainMode: currentChainMode(),
+    // 唸給阿嬤聽的那一句。字先給畫面，聲音由 /api/tts 用 intentId 再要 —— 瀏覽器不送文字。
+    speech: {
+      text: speechFor({
+        intent,
+        payment,
+        rulesHit: decision.rulesHit,
+        guardian: demo.persona.guardian.name,
+      }),
+    },
     fields: f,
     transcript: parsed.transcript,
     intent,
