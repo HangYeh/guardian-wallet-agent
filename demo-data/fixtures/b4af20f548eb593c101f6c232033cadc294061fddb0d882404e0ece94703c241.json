@@ -1,0 +1,15 @@
+{
+  "key": "b4af20f548eb593c101f6c232033cadc294061fddb0d882404e0ece94703c241",
+  "model": "gpt-4.1-mini",
+  "schemaName": "risk_assessment",
+  "note": "<message> 台灣電力股份有限公司 TAIWAN POWER COMPANY 電費繳款通知 用戶名稱 王○英 用戶編號 01-23-4567-89-0 用…",
+  "latencyMs": 1604,
+  "data": {
+    "score": 0,
+    "scamType": "none",
+    "tactics": [],
+    "elderExplanation": "這看起來像是正常的電費繳款通知。",
+    "guardianExplanation": "這封信件格式完整，內容符合一般電費帳單，沒有要求匯款或提供可疑連結，沒有急迫或保證獲利的語句，整體看起來正常。"
+  },
+  "recordedAt": "2026-09-05T00:50:51.532Z"
+}

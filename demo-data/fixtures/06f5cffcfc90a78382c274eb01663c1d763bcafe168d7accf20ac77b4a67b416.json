@@ -1,0 +1,21 @@
+{
+  "key": "06f5cffcfc90a78382c274eb01663c1d763bcafe168d7accf20ac77b4a67b416",
+  "model": "gpt-4.1-mini",
+  "schemaName": "risk_assessment",
+  "note": "<message> 秀英姐，老師這週帶單保證獲利 30%，名額只剩 3 位，先轉 20,000 到 (998) 0987-6543-2100 卡位。 </mes…",
+  "latencyMs": 1859,
+  "data": {
+    "score": 90,
+    "scamType": "investment",
+    "tactics": [
+      "保證獲利",
+      "製造急迫感",
+      "冒充熟人",
+      "要求轉帳",
+      "限定名額"
+    ],
+    "elderExplanation": "這看起來像有人保證賺錢要你趕快付錢。",
+    "guardianExplanation": "訊息冒充熟人，保證高額獲利且名額有限，急促要求轉帳，典型投資詐騙手法。"
+  },
+  "recordedAt": "2026-09-05T00:51:01.086Z"
+}

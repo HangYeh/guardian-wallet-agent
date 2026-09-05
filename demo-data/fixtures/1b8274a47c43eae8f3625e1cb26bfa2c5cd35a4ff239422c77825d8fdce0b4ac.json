@@ -1,0 +1,18 @@
+{
+  "key": "1b8274a47c43eae8f3625e1cb26bfa2c5cd35a4ff239422c77825d8fdce0b4ac",
+  "model": "gpt-4.1-mini",
+  "schemaName": "parsed_bill",
+  "note": "這是一張帳單或付款通知的照片，請依規則抽取欄位。",
+  "latencyMs": 2083,
+  "data": {
+    "kind": "bill",
+    "payeeName": "台灣電力股份有限公司",
+    "amount": 1280,
+    "dueDate": "2026-09-20",
+    "category": "utility",
+    "statedAccount": null,
+    "confidence": 1,
+    "evidence": "本期應繳總金額 NT$ 1,280 繳費期限 2026/09/20"
+  },
+  "recordedAt": "2026-09-05T00:50:48.346Z"
+}

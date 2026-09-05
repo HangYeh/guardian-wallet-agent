@@ -18,7 +18,8 @@
     "chain:deploy": "cd chain && npx hardhat run scripts/deploy.ts --network localhost",
     "chain:deploy:testnet": "cd chain && npx hardhat run scripts/deploy.ts --network baseSepolia",
     "chain:typecheck": "cd chain && npx tsc --noEmit",
-    "dev:lan": "next dev --hostname 0.0.0.0"
+    "dev:lan": "next dev --hostname 0.0.0.0",
+    "fixtures:record": "node scripts/record-fixtures.mjs"
   },
   "dependencies": {
     "next": "16.3.4",

@@ -11,6 +11,8 @@
 
 const OPENAI_URL = 'https://api.openai.com/v1/chat/completions';
 
+import { fixtureKey, fixturesMode, readFixture, recording, writeFixture } from '@/lib/fixtures';
+
 export const DEFAULT_MODEL = 'gpt-4.1-mini';
 
 /** 預設逾時。舞台上超過這個秒數就該走規則備援，不能讓評審看著轉圈。 */
@@ -32,12 +34,14 @@ export class LlmError extends Error {
 }
 
 /**
- * 現在能不能呼叫模型。
- * `DEMO_MODE=fixtures` 是舞台保險絲：現場網路不通時整個系統改走規則路徑，
- * 功能會退化但不會停擺。
+ * 現在能不能走模型那條路。
+ *
+ * `DEMO_MODE=fixtures` 回 true，但它讀的是硬碟上錄好的回應，**不需要金鑰、
+ * 不需要網路**（見 `fixtures.ts`）。M4.5 之前這裡回 false，整個系統退回規則路徑 ——
+ * 那也能跑，但畫面會少掉逐字稿與模型風險分，等於台上示範的是功能砍半的版本。
  */
 export function llmEnabled(): boolean {
-  if (process.env.DEMO_MODE === 'fixtures') return false;
+  if (fixturesMode()) return true;
   return Boolean(process.env.OPENAI_API_KEY);
 }
 
@@ -64,10 +68,41 @@ export async function completeJson<T>(args: {
   timeoutMs?: number;
   maxTokens?: number;
 }): Promise<{ data: T; model: string; latencyMs: number }> {
+  const model = args.model ?? activeModel();
+  const fixture = fixtureKey({
+    model,
+    schemaName: args.schema.name,
+    system: args.system,
+    user: args.user,
+    images: args.images,
+  });
+
+  // ---- 播放：從硬碟讀，完全不碰網路 ----
+  if (fixturesMode()) {
+    const playbackStart = Date.now();
+    const hit = readFixture(fixture);
+    if (!hit) {
+      throw new LlmError(
+        'fixtures 模式裡找不到這一則的錄音',
+        `key=${fixture.slice(0, 12)}… schema=${args.schema.name}。` +
+          '錄音是照請求內容雜湊的，所以改過提示詞或換了圖就會失效 —— 重錄一次：npm run fixtures:record',
+      );
+    }
+    // **回報真的耗時，而且在型號後面標明是回放。**
+    //
+    // 原本這裡回傳錄音當時的 latencyMs，畫面就會寫「gpt-4.1-mini · 3660 ms」——
+    // 看起來剛剛真的呼叫了模型，其實只讀了一個檔。一個主打誠實揭露的作品
+    // 不能在自己的軌跡上演戲，尤其是演給評審看的那一條。
+    return {
+      data: hit.data as T,
+      model: `${hit.model}（錄音回放）`,
+      latencyMs: Date.now() - playbackStart,
+    };
+  }
+
   const key = process.env.OPENAI_API_KEY;
   if (!key) throw new LlmError('OPENAI_API_KEY 沒有設定');
 
-  const model = args.model ?? activeModel();
   const started = Date.now();
 
   let res: Response;
@@ -134,5 +169,19 @@ export async function completeJson<T>(args: {
     throw new LlmError('模型回傳的不是合法 JSON', content.slice(0, 200));
   }
 
-  return { data, model, latencyMs: Date.now() - started };
+  const latencyMs = Date.now() - started;
+
+  // ---- 錄音：只在明確要求時寫，而且只寫成功的回應 ----
+  if (recording()) {
+    writeFixture({
+      key: fixture,
+      model,
+      schemaName: args.schema.name,
+      note: args.user,
+      latencyMs,
+      data,
+    });
+  }
+
+  return { data, model, latencyMs };
 }

@@ -1,0 +1,21 @@
+{
+  "key": "afef4809f455fb10a79f1c70923642f68a4ba4cc9970cefd6409a9bb63126935",
+  "model": "gpt-4.1-mini",
+  "schemaName": "risk_assessment",
+  "note": "<message> 阿嬤我是小宇，我出車禍手機壞了用朋友的，急需 15,000 賠人家，先轉這個帳戶 (997) 0021-2345-6789，不要跟媽媽說。 …",
+  "latencyMs": 1818,
+  "data": {
+    "score": 90,
+    "scamType": "family_emergency",
+    "tactics": [
+      "假冒親友",
+      "製造急迫感",
+      "要求保密",
+      "急需金錢",
+      "使用他人手機聯絡"
+    ],
+    "elderExplanation": "這看起來像有人假裝家人急著要錢。",
+    "guardianExplanation": "訊息假冒家人說出車禍急需賠償，並要求保密，這是典型的家人急難詐騙手法，應提高警覺。"
+  },
+  "recordedAt": "2026-09-05T00:51:04.750Z"
+}

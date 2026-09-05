@@ -1,0 +1,19 @@
+{
+  "key": "969f8022fd1a3ee5430be8240297235742845741ea8af8fb2c3619548fc9e525",
+  "model": "gpt-4.1-mini",
+  "schemaName": "risk_assessment",
+  "note": "<message> 幫我轉三千給孫子小宇當生日紅包 </message>",
+  "latencyMs": 2451,
+  "data": {
+    "score": 20,
+    "scamType": "family_emergency",
+    "tactics": [
+      "假冒親友",
+      "要求轉帳",
+      "情感操控"
+    ],
+    "elderExplanation": "這看起來像有人假裝家人要錢。",
+    "guardianExplanation": "訊息中有人假冒孫子名義要求轉帳，利用情感操控讓長輩匆忙匯款，風險較高。"
+  },
+  "recordedAt": "2026-09-05T00:50:57.368Z"
+}

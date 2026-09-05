@@ -1,0 +1,18 @@
+{
+  "key": "13923c634741adcbff3f59799adf4f8f4a0a9aed5e26980fae4f3c1d09ddcb27",
+  "model": "gpt-4.1-mini",
+  "schemaName": "parsed_bill",
+  "note": "阿嬤我是小宇，我出車禍手機壞了用朋友的，急需 15,000 賠人家，先轉這個帳戶 (997) 0021-2345-6789，不要跟媽媽說。",
+  "latencyMs": 1805,
+  "data": {
+    "kind": "transfer",
+    "payeeName": "小宇",
+    "amount": 15000,
+    "dueDate": null,
+    "category": "person",
+    "statedAccount": "(997) 0021-2345-6789",
+    "confidence": 0.9,
+    "evidence": "急需 15,000 賠人家，先轉這個帳戶 (997) 0021-2345-6789"
+  },
+  "recordedAt": "2026-09-05T00:51:02.927Z"
+}

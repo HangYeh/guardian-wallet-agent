@@ -1,0 +1,18 @@
+{
+  "key": "044b5863858eeb425ede0ed894eb13a818c0144d3cb6f2095c66d565f75fad78",
+  "model": "gpt-4.1-mini",
+  "schemaName": "parsed_bill",
+  "note": "幫我轉三千給孫子小宇當生日紅包",
+  "latencyMs": 1602,
+  "data": {
+    "kind": "transfer",
+    "payeeName": "孫子小宇",
+    "amount": 3000,
+    "dueDate": null,
+    "category": "person",
+    "statedAccount": null,
+    "confidence": 1,
+    "evidence": "轉三千給孫子小宇當生日紅包"
+  },
+  "recordedAt": "2026-09-05T00:50:54.911Z"
+}

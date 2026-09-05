@@ -1,0 +1,18 @@
+{
+  "key": "f7b9139d79c69be5a29ee5fa786011ef6103a21b75b83284802cc46e22d2814a",
+  "model": "gpt-4.1-mini",
+  "schemaName": "parsed_bill",
+  "note": "【健保署通知】您的健保卡涉及詐領，帳戶將於 30 分鐘內凍結。請立即將 50,000 元轉入監管帳戶（999）1234-5678-9012 以解除，此案保密，勿…",
+  "latencyMs": 1713,
+  "data": {
+    "kind": "transfer",
+    "payeeName": "監管帳戶",
+    "amount": 50000,
+    "dueDate": null,
+    "category": "other",
+    "statedAccount": "（999）1234-5678-9012",
+    "confidence": 0.9,
+    "evidence": "請立即將 50,000 元轉入監管帳戶（999）1234-5678-9012 以解除"
+  },
+  "recordedAt": "2026-09-05T00:50:53.274Z"
+}

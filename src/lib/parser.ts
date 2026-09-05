@@ -70,6 +70,14 @@ function cacheKey(kind: 'text' | 'image', input: string): string {
 }
 
 function cacheGet(key: string): ParseResult | undefined {
+  // 錄音時一律不吃快取。
+  //
+  // 這條踩過：錄音跑完只錄到風險那幾則，**解析一則都沒有** —— 因為那幾張帳單
+  // 在同一個行程裡早就解析過了，快取直接回手，呼叫根本沒到 `completeJson`。
+  // 播放時伺服器是冷的，那些呼叫就會落空退回規則解析：demo 跑得動，
+  // 但沒有逐字稿、欄位是規則抽的 —— **而且錄音當下不會有任何錯誤訊息**。
+  if (process.env.RECORD_FIXTURES === 'true') return undefined;
+
   const hit = cacheHost.__guardianParseCache!.get(key);
   return hit ? { ...hit, cached: true } : undefined;
 }
@@ -193,7 +201,7 @@ export async function parseText(rawText: string, hints: PayeeHint[] = []): Promi
       engine: 'rules',
       latencyMs: Date.now() - started,
       fallbackReason:
-        process.env.DEMO_MODE === 'fixtures' ? 'DEMO_MODE=fixtures' : '沒有 OPENAI_API_KEY',
+        '沒有 OPENAI_API_KEY',
     };
   }
 

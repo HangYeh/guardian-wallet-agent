@@ -1,0 +1,18 @@
+{
+  "key": "9f67a32a4bc974c8b034bfd91950f1878b29b5a43f893bb444f3c4c81a2a95d1",
+  "model": "gpt-4.1-mini",
+  "schemaName": "parsed_bill",
+  "note": "秀英姐，老師這週帶單保證獲利 30%，名額只剩 3 位，先轉 20,000 到 (998) 0987-6543-2100 卡位。",
+  "latencyMs": 1820,
+  "data": {
+    "kind": "transfer",
+    "payeeName": "(998) 0987-6543-2100",
+    "amount": 20000,
+    "dueDate": null,
+    "category": "person",
+    "statedAccount": "(998) 0987-6543-2100",
+    "confidence": 0.9,
+    "evidence": "先轉 20,000 到 (998) 0987-6543-2100 卡位。"
+  },
+  "recordedAt": "2026-09-05T00:50:59.221Z"
+}
