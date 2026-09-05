@@ -331,7 +331,7 @@ npm run scan:secrets    # 掃工作目錄與 git 全歷史有沒有金鑰
 
 ## 作品展示
 
-- **評選影片**：（YouTube 連結於繳件時補上）
+- **評選影片**：<https://youtu.be/EM4TilmAbds>（1 分 43 秒，無旁白、字幕呈現；影片裡的鏈是本機 Hardhat，合約另已部署 Base Sepolia）
 - **試玩指南**：[docs/DEMO.md](docs/DEMO.md)，照劇本按，每一幕應該看到什麼都寫在裡面。
 - **展示頁（GitHub Pages，靜態）**：<https://hangyeh.github.io/guardian-wallet-agent/>。一開頭就是「評審怎麼測試這個 demo」，接著四幕截圖、架構、合約檢查與影片。
 - **作品展示網址**：互動 demo 無公開部署。守護者端點與 operator 金鑰不該放在公網上，請依上方步驟在本機執行，離線模式一分鐘內可跑。
