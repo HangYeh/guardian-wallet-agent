@@ -273,14 +273,28 @@ export type Finding = {
 };
 
 export type WeeklyReport = {
-  month: string; // "2026-09"
+  month: string; // "2026-09"，報告涵蓋的月份
+  /**
+   * 支出統計涵蓋的月份。**可能不等於 `month`** —— 異常偵測跑的是歷史帳
+   * （劇本裡到八月為止），而「本月守住」講的是今天發生的事。理由見 `report.ts`。
+   */
+  spendMonth: string;
   totalSpend: number;
   byCategory: { category: string; amount: number }[];
-  blockedAmount: number; // 攔下的詐騙金額
+  blockedAmount: number; // 攔下的詐騙金額（對方開口要的）
+  /**
+   * 那些請求的授權信封實際封了多少。
+   *
+   * 跟 `blockedAmount` 一起看才完整：對方要五萬，但信封只封了三千，
+   * 所以就算門神判錯，也不可能付出五萬。少了這個數字，
+   * 「守住五萬」會被合理質疑成灌水。
+   */
+  blockedCapped: number;
   savedAmount: number; // 異常省下的金額
   guardedTotal: number; // blockedAmount + savedAmount，週報頭條數字
   findings: Finding[];
-  paymentsExecuted: number;
+  paymentsExecuted: number; // 這個月門神實際付掉的筆數
+  paidThisMonth: number; // 這個月門神實際付掉的金額
   narrative: string; // 給 ElevenLabs 唸的中文口語
   audioUrl?: string;
 };
