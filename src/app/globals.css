@@ -22,8 +22,8 @@
   --color-ochre: #96681c;
   --color-ochre-bg: #f3e9d5;
 
-  --font-sans: var(--font-noto-sans-tc), "PingFang TC", "Microsoft JhengHei", system-ui, sans-serif;
-  --font-serif: var(--font-noto-serif-tc), "Songti TC", Georgia, serif;
+  --font-sans: "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", system-ui, sans-serif;
+  --font-serif: "Noto Serif TC", "Songti TC", Georgia, serif;
   --font-mono: ui-monospace, "Cascadia Mono", Consolas, monospace;
 }
 

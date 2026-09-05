@@ -506,7 +506,7 @@ npm run scan:secrets    # 掃工作目錄與 git 全歷史有沒有金鑰
 | Hardhat 3、@nomicfoundation/hardhat-toolbox-viem | 合約編譯、測試、部署 | MIT |
 | OpenZeppelin Contracts 5 | ERC-20、Ownable | MIT |
 | vitest 5、TypeScript 5、ESLint 9 | 測試、型別、lint | MIT / Apache-2.0 |
-| Noto Sans TC、Noto Serif TC（Google Fonts，經 `next/font` 自架） | 字型 | SIL Open Font License 1.1 |
+| Noto Sans TC、Noto Serif TC（Google Fonts，以 `<link>` 載入；載不到時退回系統字型，頁面照常） | 字型 | SIL Open Font License 1.1 |
 
 **資料與素材**
 

@@ -1,22 +1,13 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
-import { Noto_Sans_TC, Noto_Serif_TC } from 'next/font/google';
 import './globals.css';
 import DemoBar from '@/components/DemoBar';
 
-const sans = Noto_Sans_TC({
-  subsets: ['latin'],
-  weight: ['400', '500', '700'],
-  variable: '--font-noto-sans-tc',
-  display: 'swap',
-});
-
-const serif = Noto_Serif_TC({
-  subsets: ['latin'],
-  weight: ['600', '700'],
-  variable: '--font-noto-serif-tc',
-  display: 'swap',
-});
+// 字型用 <link> 從 Google Fonts 載，不走 next/font：
+// next/font 會在 dev server 第一次啟動時下載字型檔，下載不到（斷網、fonts.gstatic.com 連不上）
+// 整站每一頁都 500。用 <link> 的話載不到就退回系統字型（PingFang / 微軟正黑），畫面照常。
+const GOOGLE_FONTS =
+  'https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&family=Noto+Serif+TC:wght@600;700&display=swap';
 
 export const metadata: Metadata = {
   title: '門神錢包 Guardian Wallet',
@@ -34,7 +25,12 @@ const NAV = [
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="zh-Hant">
-      <body className={`${sans.variable} ${serif.variable}`}>
+      <head>
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
+        <link rel="stylesheet" href={GOOGLE_FONTS} />
+      </head>
+      <body>
         <header className="border-b border-[var(--color-line)] bg-[var(--color-surface)]">
           <div className="mx-auto flex max-w-[1080px] flex-wrap items-center gap-x-6 gap-y-2 px-[clamp(1rem,4vw,2.5rem)] py-3">
             <Link href="/" className="font-serif text-[1.05rem] font-bold no-underline text-[var(--color-ink)]">
