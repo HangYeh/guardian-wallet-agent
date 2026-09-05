@@ -2,7 +2,8 @@ import { AllowlistToggle, ApprovalButtons, PolicyForm } from '@/components/Guard
 import GuardianLive from '@/components/GuardianLive';
 import { loadDemo, formatTWD, payeeById } from '@/lib/demo';
 import { blockedAttempts } from '@/lib/report';
-import { effectivePolicy, state } from '@/lib/store';
+import { cooldownRemainingHours } from '@/lib/policy';
+import { allowlistedAt, effectivePolicy, state } from '@/lib/store';
 
 export const dynamic = 'force-dynamic';
 
@@ -35,6 +36,7 @@ export default function GuardianPage() {
   const { persona } = demo;
   // 讀「現在生效的」政策，不是劇本檔裡的原始值 —— 守護者改過就要看得到。
   const policy = effectivePolicy();
+  const now = new Date();
   const pending = state().payments.filter((p) => p.status === 'pending_approval');
   // 家人通知只列最近五則；再多就沒人看了。
   const alerts = blockedAttempts(state()).slice(0, 5);
@@ -43,7 +45,13 @@ export default function GuardianPage() {
     { label: '單筆上限', value: formatTWD(policy.perTxCap), note: '超過就直接拒付，合約層強制' },
     { label: '單日上限', value: formatTWD(policy.dailyCap), note: '擋分批小額掏空' },
     { label: '核准門檻', value: formatTWD(policy.approvalThreshold), note: `超過要${persona.guardian.name}點頭` },
-    { label: '新收款人', value: policy.newPayeeRequiresApproval ? '一律要核准' : '免核准', note: `冷卻 ${policy.newPayeeCooldownHours} 小時` },
+    {
+      label: '新收款人',
+      value: policy.newPayeeRequiresApproval ? '一律要核准' : '免核准',
+      note: policy.newPayeeRequiresApproval
+        ? `剛加進白名單的，${policy.newPayeeCooldownHours} 小時內仍要核准`
+        : '加進白名單就能自動付',
+    },
     {
       label: '安靜時段',
       value: policy.quietHours ? `${policy.quietHours[0]}:00 – ${policy.quietHours[1]}:00` : '無',
@@ -220,18 +228,35 @@ export default function GuardianPage() {
           <tbody>
             {demo.payees.map((p) => {
               const on = policy.allowlist.includes(p.id);
+              // 剛加進白名單的人還在冷卻期：跟政策引擎用同一個算法，畫面不會比引擎樂觀。
+              const coolingLeft = on ? cooldownRemainingHours(policy, allowlistedAt(p.id), now) : 0;
               return (
                 <tr key={p.id}>
                   <td className="font-medium">{p.name}</td>
                   <td className="text-[var(--color-ink-2)]">{p.kind}</td>
                   <td className="num">{p.typicalAmount ? p.typicalAmount.toLocaleString('zh-TW') : '—'}</td>
                   <td>
-                    <span className="pill" style={{ color: on ? 'var(--color-celadon)' : 'var(--color-ink-3)' }}>
-                      {on ? '白名單' : '需核准'}
-                    </span>
+                    {coolingLeft > 0 ? (
+                      <span
+                        className="pill"
+                        style={{ color: 'var(--color-ochre)' }}
+                        title="剛加進白名單。冷卻期內的付款仍要你核准，過了才會在額度內自動付"
+                      >
+                        冷卻中 · 還剩 {Math.ceil(coolingLeft)} 小時
+                      </span>
+                    ) : (
+                      <span className="pill" style={{ color: on ? 'var(--color-celadon)' : 'var(--color-ink-3)' }}>
+                        {on ? '白名單' : '需核准'}
+                      </span>
+                    )}
                   </td>
                   <td>
-                    <AllowlistToggle payeeId={p.id} payeeName={p.name} allowed={on} />
+                    <AllowlistToggle
+                      payeeId={p.id}
+                      payeeName={p.name}
+                      allowed={on}
+                      cooldownHours={policy.newPayeeRequiresApproval ? policy.newPayeeCooldownHours : 0}
+                    />
                   </td>
                   <td className="mono text-[0.72rem] text-[var(--color-ink-3)]">{p.address}</td>
                 </tr>

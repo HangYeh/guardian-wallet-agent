@@ -4,8 +4,17 @@ import { join } from 'node:path';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import { keccak256, toBytes } from 'viem';
 import { loadDemo } from '@/lib/demo';
-import { intentHash } from '@/lib/intent';
-import { effectivePolicy, resetAll, setAllowlisted, state, updatePolicy } from '@/lib/store';
+import { buildIntent, intentHash } from '@/lib/intent';
+import { decide } from '@/lib/policy';
+import {
+  allowlistedAt,
+  effectivePolicy,
+  payeesInEffect,
+  resetAll,
+  setAllowlisted,
+  state,
+  updatePolicy,
+} from '@/lib/store';
 import { MockWallet, type PayArgs } from '@/lib/wallet';
 
 /**
@@ -93,6 +102,99 @@ describe('白名單增減', () => {
     setAllowlisted('contact_xiaoyu', true);
     resetAll();
     expect(effectivePolicy().allowlist).not.toContain('contact_xiaoyu');
+  });
+});
+
+describe('白名單的時間戳與冷卻期', () => {
+  // 台北 10:00，白天，不會撞到安靜時段。
+  const T0 = new Date('2026-09-05T02:00:00.000Z');
+  const hoursLater = (h: number) => new Date(T0.getTime() + h * 3_600_000);
+
+  it('守護者加進去的會記時間；劇本檔原本就在名單上的沒有', () => {
+    expect(allowlistedAt('payee_taipower')).toBeUndefined();
+    setAllowlisted('contact_xiaoyu', true, T0);
+    expect(allowlistedAt('contact_xiaoyu')).toBe(T0.toISOString());
+  });
+
+  it('重複加不會把時間往後推', () => {
+    setAllowlisted('contact_xiaoyu', true, T0);
+    setAllowlisted('contact_xiaoyu', true, hoursLater(5));
+    expect(allowlistedAt('contact_xiaoyu')).toBe(T0.toISOString());
+  });
+
+  it('移出去時間戳跟著消失；再加回來從那一刻重新起算 —— 先踢掉再加回不能跳過冷卻', () => {
+    setAllowlisted('contact_xiaoyu', true, T0);
+    setAllowlisted('contact_xiaoyu', false);
+    expect(allowlistedAt('contact_xiaoyu')).toBeUndefined();
+
+    setAllowlisted('contact_xiaoyu', true, hoursLater(30));
+    expect(allowlistedAt('contact_xiaoyu')).toBe(hoursLater(30).toISOString());
+  });
+
+  it('一鍵重置也清掉時間戳', () => {
+    setAllowlisted('contact_xiaoyu', true, T0);
+    resetAll();
+    expect(allowlistedAt('contact_xiaoyu')).toBeUndefined();
+  });
+
+  /**
+   * 「按了沒用」那個 bug 的回歸測試。
+   *
+   * 9/5 之前守護者按「加進白名單」只改 `policy.allowlist`，而政策引擎讀的是
+   * 劇本檔裡寫死的 `payee.allowlisted` —— 畫面上的標籤變色了，判斷照舊。
+   */
+  it('payeesInEffect 的白名單旗標跟著現在生效的政策走，劇本檔本身不動', () => {
+    const xiaoyu = () => payeesInEffect().find((p) => p.id === 'contact_xiaoyu')!;
+    const taipower = () => payeesInEffect().find((p) => p.id === 'payee_taipower')!;
+
+    expect(xiaoyu().allowlisted).toBe(false);
+    expect(taipower().allowlisted).toBe(true);
+
+    setAllowlisted('contact_xiaoyu', true, T0);
+    setAllowlisted('payee_taipower', false);
+
+    expect(xiaoyu().allowlisted).toBe(true);
+    expect(taipower().allowlisted).toBe(false);
+    expect(loadDemo().payees.find((p) => p.id === 'contact_xiaoyu')!.allowlisted).toBe(false);
+    expect(loadDemo().payees.find((p) => p.id === 'payee_taipower')!.allowlisted).toBe(true);
+  });
+
+  it('剛加進白名單 → 引擎擋 NEW_PAYEE_COOLDOWN（不再是 NOT_ALLOWLISTED）；24 小時後放行', () => {
+    setAllowlisted('contact_xiaoyu', true, T0);
+    const policy = effectivePolicy();
+    const payee = payeesInEffect().find((p) => p.id === 'contact_xiaoyu')!;
+
+    const ctxAt = (now: Date) => ({
+      intent: buildIntent({
+        draft: {
+          kind: 'transfer' as const,
+          payeeName: payee.name,
+          amount: 600,
+          dueDate: null,
+          category: 'person',
+          confidence: 0.9,
+        },
+        rawText: '阿嬤，紅包 600 匯給我',
+        source: 'text' as const,
+        policy,
+        payee,
+        now,
+      }),
+      policy,
+      payee,
+      payeeAddedAt: allowlistedAt('contact_xiaoyu'),
+      now,
+    });
+
+    const soon = decide(ctxAt(hoursLater(1)));
+    expect(soon.action).toBe('hold');
+    expect(soon.rulesHit).toContain('NEW_PAYEE_COOLDOWN');
+    expect(soon.rulesHit).not.toContain('NOT_ALLOWLISTED');
+    expect(soon.reason).toContain('還要等 23 小時');
+
+    const later = decide(ctxAt(hoursLater(25)));
+    expect(later.action).toBe('auto');
+    expect(later.rulesHit).toEqual([]);
   });
 });
 

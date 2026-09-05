@@ -194,10 +194,13 @@ export function AllowlistToggle({
   payeeId,
   payeeName,
   allowed,
+  cooldownHours,
 }: {
   payeeId: string;
   payeeName: string;
   allowed: boolean;
+  /** 新收款人冷卻期（小時）。0 代表這條規則沒開。 */
+  cooldownHours: number;
 }) {
   const { pending, result, run } = useAction();
 
@@ -210,7 +213,9 @@ export function AllowlistToggle({
         title={
           allowed
             ? `移出白名單之後，${payeeName} 的付款一律要你核准`
-            : `加進白名單之後，${payeeName} 在額度內可以自動付`
+            : cooldownHours > 0
+              ? `加進白名單之後，${payeeName} 要先過 ${cooldownHours} 小時冷卻期，之後在額度內才會自動付`
+              : `加進白名單之後，${payeeName} 在額度內可以自動付`
         }
         onClick={() => run(() => toggleAllowlistAction(payeeId, !allowed))}
       >

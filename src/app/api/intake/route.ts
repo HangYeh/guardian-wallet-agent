@@ -10,7 +10,7 @@ import { walletFor } from '@/lib/wallet';
 import { buildIntent, currentChainMode, intentToTransaction } from '@/lib/intent';
 import { visionEnabled } from '@/lib/llm';
 import { matchPayee, parseImage, parseText, type ParseResult } from '@/lib/parser';
-import { effectivePolicy, state } from '@/lib/store';
+import { allowlistedAt, effectivePolicy, payeesInEffect, state } from '@/lib/store';
 import type { IntentSource, TraceStep } from '@/lib/types';
 
 export const dynamic = 'force-dynamic';
@@ -127,6 +127,8 @@ async function intake(body: IntakeBody) {
 async function runPipeline(resolved: Resolved, body: IntakeBody, runId: string) {
   const demo = loadDemo();
   const policy = effectivePolicy();
+  // 收款人的白名單旗標要跟現在生效的政策一致，不是劇本檔寫死的那個。
+  const payees = payeesInEffect();
   const image = 'image' in resolved ? resolved.image : undefined;
   const inputText = 'text' in resolved ? resolved.text : undefined;
   const isImage = image !== undefined;
@@ -157,7 +159,7 @@ async function runPipeline(resolved: Resolved, body: IntakeBody, runId: string) 
 
   const parsed: ParseResult = image
     ? await parseImage(image)
-    : await parseText(inputText!, demo.payees);
+    : await parseText(inputText!, payees);
 
   step(
     'plan',
@@ -183,7 +185,7 @@ async function runPipeline(resolved: Resolved, body: IntakeBody, runId: string) 
     isImage ? 'parseImage' : 'parseText',
   );
 
-  const payee = matchPayee(demo.payees, f.payeeName, f.category);
+  const payee = matchPayee(payees, f.payeeName, f.category);
   step(
     'tool',
     payee
@@ -324,6 +326,8 @@ async function runPipeline(resolved: Resolved, body: IntakeBody, runId: string) 
     wallet: walletFor(policy),
     payee,
     risk: riskLevel,
+    // 守護者剛加進白名單的人，帶上加入時間讓冷卻期真的能觸發。
+    payeeAddedAt: payee ? allowlistedAt(payee.id) : undefined,
   });
 
   step(

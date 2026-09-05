@@ -1,4 +1,4 @@
-import type { AuditEvent, Payment, PaymentIntent, Policy, TraceStep } from '@/lib/types';
+import type { AuditEvent, Payee, Payment, PaymentIntent, Policy, TraceStep } from '@/lib/types';
 import { clearAuditFile } from '@/lib/audit';
 import { resetBus } from '@/lib/bus';
 import { loadDemo, reloadDemo } from '@/lib/demo';
@@ -22,10 +22,24 @@ export type RuntimeState = {
    * 舞台上第二次演出不該繼承第一次調過的上限。
    */
   policyOverride?: Partial<Policy>;
+  /**
+   * 守護者在執行期把誰加進白名單、什麼時候（ISO）。
+   *
+   * 新收款人冷卻期靠這個算：剛加進去的人 24 小時內付款仍要核准。
+   * 劇本檔原本就在白名單上的（台電那些）沒有時間戳 —— 它們是「一直都在」，不是「剛加的」。
+   */
+  allowlistedAt?: Record<string, string>;
 };
 
 function empty(): RuntimeState {
-  return { intents: [], payments: [], audit: [], trace: [], startedAt: new Date().toISOString() };
+  return {
+    intents: [],
+    payments: [],
+    audit: [],
+    trace: [],
+    startedAt: new Date().toISOString(),
+    allowlistedAt: {},
+  };
 }
 
 // dev 模式的熱更新會重新載入模組，掛在 globalThis 上才不會每次改檔就掉狀態。
@@ -74,16 +88,54 @@ export function updatePolicy(patch: Partial<Policy>): { before: Policy; after: P
   return { before, after: effectivePolicy() };
 }
 
-/** 把某個收款人加進白名單或移出去。 */
-export function setAllowlisted(payeeId: string, allowed: boolean): { allowlist: string[] } {
+/**
+ * 把某個收款人加進白名單或移出去。
+ *
+ * 加進去的那一刻會記時間，冷卻期從那時起算。移出去再加回來會**重新起算** ——
+ * 不然「先踢掉再加回」就能跳過冷卻，那條規則等於白設。已經在名單上的重複加是 no-op，
+ * 不會把時間往後推。
+ */
+export function setAllowlisted(
+  payeeId: string,
+  allowed: boolean,
+  now: Date = new Date(),
+): { allowlist: string[]; addedAt?: string } {
   const current = effectivePolicy().allowlist;
-  const next = allowed
-    ? current.includes(payeeId)
-      ? current
-      : [...current, payeeId]
-    : current.filter((id) => id !== payeeId);
-  updatePolicy({ allowlist: next });
-  return { allowlist: next };
+  const s = state();
+  // dev 熱更新可能留著舊形狀的狀態物件，沒有這個欄位就補上。
+  const stamps = (s.allowlistedAt ??= {});
+
+  if (allowed) {
+    if (!current.includes(payeeId)) {
+      stamps[payeeId] = now.toISOString();
+      updatePolicy({ allowlist: [...current, payeeId] });
+    }
+    return { allowlist: effectivePolicy().allowlist, addedAt: stamps[payeeId] };
+  }
+
+  delete stamps[payeeId];
+  updatePolicy({ allowlist: current.filter((id) => id !== payeeId) });
+  return { allowlist: effectivePolicy().allowlist };
+}
+
+/** 守護者在執行期加進白名單的收款人，回傳加入時間（ISO）；劇本檔原本就有的回 undefined。 */
+export function allowlistedAt(payeeId: string): string | undefined {
+  return state().allowlistedAt?.[payeeId];
+}
+
+/**
+ * 收款人清單，白名單旗標照**現在生效的**政策。
+ *
+ * 劇本檔裡每個收款人都寫死一個 `allowlisted`，而政策引擎、風險規則、mock 錢包
+ * 讀的都是那個旗標；守護者按「加進白名單」改的卻是 `policy.allowlist`。
+ * 9/5 之前這兩份沒接起來 —— 按鈕只會讓畫面上的標籤變色，判斷照舊，
+ * 跟 `effectivePolicy()` 上面那段警告講的是同一種病。
+ *
+ * 所有要拿收款人去做判斷的地方都走這裡，不要直接讀 `loadDemo().payees`。
+ */
+export function payeesInEffect(): Payee[] {
+  const allow = new Set(effectivePolicy().allowlist);
+  return loadDemo().payees.map((p) => ({ ...p, allowlisted: allow.has(p.id) }));
 }
 
 export function counts() {

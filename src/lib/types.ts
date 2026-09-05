@@ -24,6 +24,10 @@ export type Payee = {
   name: string; // "台灣電力公司"
   address: `0x${string}`; // 鏈上地址（demo 用 Hardhat 帳戶 #5–#13）
   kind: PayeeKind;
+  /**
+   * 劇本檔的**初始**旗標。執行期以 `effectivePolicy().allowlist` 為準 ——
+   * 要拿收款人去做判斷，走 `payeesInEffect()`，不要直接讀劇本檔（store.ts 有說明）。
+   */
   allowlisted: boolean;
   typicalAmount?: number; // 歷史中位數，供金額突增判斷
   aliases?: string[]; // 解析後比對用的別名，例「台電」「電費」
@@ -33,7 +37,6 @@ export type Payee = {
 export type Policy = {
   perTxCap: number; // 單筆上限，例 3000
   dailyCap: number; // 單日上限，例 5000
-  monthlyCap?: number;
   approvalThreshold: number; // 超過就轉人工核准，例 2000
   newPayeeRequiresApproval: boolean;
   newPayeeCooldownHours: number; // 新收款人冷卻期，例 24

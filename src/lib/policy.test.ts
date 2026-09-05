@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { buildIntent } from '@/lib/intent';
-import { decide, inQuietHours, taipeiHour, type PolicyContext } from '@/lib/policy';
+import { cooldownRemainingHours, decide, inQuietHours, taipeiHour, type PolicyContext } from '@/lib/policy';
 import type { ParsedFields } from '@/lib/parser';
 import type { Payee, Policy } from '@/lib/types';
 
@@ -242,3 +242,38 @@ describe('政策矩陣', () => {
     expect(decide(over).action).toBe('hold');
   });
 });
+
+describe('冷卻期剩餘時數 —— 引擎與守護者頁共用同一個算法', () => {
+  const added = (hoursAgo: number) => new Date(NOON.getTime() - hoursAgo * 3_600_000).toISOString();
+
+  it('規則沒開、或沒有加入時間 → 0', () => {
+    expect(cooldownRemainingHours({ ...POLICY, newPayeeRequiresApproval: false }, added(1), NOON)).toBe(0);
+    expect(cooldownRemainingHours(POLICY, undefined, NOON)).toBe(0);
+  });
+
+  it('加了 3 小時 → 還剩 21', () => {
+    expect(cooldownRemainingHours(POLICY, added(3), NOON)).toBeCloseTo(21, 6);
+  });
+
+  it('過了就是 0，不會變負數', () => {
+    expect(cooldownRemainingHours(POLICY, added(30), NOON)).toBe(0);
+  });
+
+  it('壞掉的時間字串當作沒有', () => {
+    expect(cooldownRemainingHours(POLICY, 'not-a-date', NOON)).toBe(0);
+  });
+
+  it('加進白名單還不到一小時，理由這樣講', () => {
+    const d = decide(ctx({ payeeAddedAt: added(0.25) }));
+    expect(d.action).toBe('hold');
+    expect(d.rulesHit).toContain('NEW_PAYEE_COOLDOWN');
+    expect(d.reason).toContain('還不到一小時');
+    expect(d.reason).toContain('還要等 24 小時');
+  });
+
+  it('規則關掉的話，剛加的人也直接放行', () => {
+    const d = decide(ctx({ policy: { ...POLICY, newPayeeRequiresApproval: false }, payeeAddedAt: added(1) }));
+    expect(d.action).toBe('auto');
+  });
+});
+

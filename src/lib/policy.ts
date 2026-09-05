@@ -69,6 +69,23 @@ export type PolicyContext = {
   now?: Date;
 };
 
+/**
+ * 新收款人冷卻期還剩幾小時。0 代表不在冷卻中：規則沒開、沒有加入時間、或已經過了。
+ *
+ * 政策引擎與守護者頁面都用這一個。畫面上寫「冷卻中」跟引擎真的擋，
+ * 必須是同一個算法 —— 否則就會出現「畫面說冷卻中、錢卻付出去了」。
+ */
+export function cooldownRemainingHours(
+  policy: Policy,
+  addedAt: string | undefined,
+  now: Date,
+): number {
+  if (!policy.newPayeeRequiresApproval || !addedAt) return 0;
+  const elapsed = (now.getTime() - new Date(addedAt).getTime()) / 3_600_000;
+  if (!Number.isFinite(elapsed)) return 0;
+  return Math.max(0, policy.newPayeeCooldownHours - elapsed);
+}
+
 type Hit = { rule: PolicyRule; action: PolicyAction; reason: string };
 
 const SEVERITY: Record<PolicyAction, number> = { auto: 0, hold: 1, block: 2 };
@@ -151,14 +168,18 @@ function evaluate(ctx: PolicyContext): PolicyDecision {
       'hold',
       `${ctx.payee.name} 不在白名單上，合約也不會讓門神付給它。`,
     );
-  } else if (policy.newPayeeRequiresApproval && ctx.payeeAddedAt) {
-    const hours = (now.getTime() - new Date(ctx.payeeAddedAt).getTime()) / 3_600_000;
-    if (Number.isFinite(hours) && hours < policy.newPayeeCooldownHours) {
+  } else {
+    // 剛加進白名單的人，冷卻期內照樣要家人點頭 —— 「先騙家人把帳戶加進去、
+    // 然後馬上出款」是常見手法，這 24 小時是留給家人反悔的。
+    const left = cooldownRemainingHours(policy, ctx.payeeAddedAt, now);
+    if (left > 0) {
+      const elapsed = policy.newPayeeCooldownHours - left;
+      const since = elapsed < 1 ? '還不到一小時' : `才 ${Math.floor(elapsed)} 小時`;
       hit(
         'NEW_PAYEE_COOLDOWN',
         'hold',
-        `${ctx.payee.name} 加進白名單才 ${Math.floor(hours)} 小時，` +
-          `未滿 ${policy.newPayeeCooldownHours} 小時冷卻期。`,
+        `${ctx.payee.name} 加進白名單${since}，未滿 ${policy.newPayeeCooldownHours} 小時冷卻期，` +
+          `還要等 ${Math.ceil(left)} 小時；這段期間的付款仍要家人核准。`,
       );
     }
   }

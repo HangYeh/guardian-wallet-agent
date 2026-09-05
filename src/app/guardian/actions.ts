@@ -3,6 +3,7 @@
 import { revalidatePath } from 'next/cache';
 import { approvePayment, rejectPayment, write } from '@/lib/execute';
 import { effectivePolicy, setAllowlisted, state, updatePolicy } from '@/lib/store';
+import { cooldownRemainingHours } from '@/lib/policy';
 import { guardianFor } from '@/lib/wallet';
 import type { Policy } from '@/lib/types';
 
@@ -113,16 +114,36 @@ export async function updatePolicyAction(form: FormData): Promise<ActionResult> 
 
 /** 把收款人加進白名單或移出去。加進去等於「這個人以後可以自動付」，是有份量的動作。 */
 export async function toggleAllowlistAction(payeeId: string, allowed: boolean): Promise<ActionResult> {
-  const { allowlist } = setAllowlisted(payeeId, allowed);
+  const now = new Date();
+  const { allowlist, addedAt } = setAllowlisted(payeeId, allowed, now);
+  const policy = effectivePolicy();
+  // 剛加進去的人還在冷卻期：畫面、稽核、回饋訊息三處都要講同一件事。
+  const cooling = allowed && cooldownRemainingHours(policy, addedAt, now) > 0;
+  const hours = policy.newPayeeCooldownHours;
 
   write({
     type: 'policy.updated',
     actor: 'guardian',
-    summary: allowed ? `把 ${payeeId} 加進白名單` : `把 ${payeeId} 移出白名單`,
-    details: { payeeId, allowed, allowlist },
+    summary: allowed
+      ? `把 ${payeeId} 加進白名單${cooling ? `（${hours} 小時冷卻期內仍要核准）` : ''}`
+      : `把 ${payeeId} 移出白名單`,
+    details: {
+      payeeId,
+      allowed,
+      allowlist,
+      addedAt: addedAt ?? null,
+      cooldownHours: cooling ? hours : null,
+    },
   });
 
   revalidatePath('/guardian');
   revalidatePath('/');
-  return { ok: true, message: allowed ? '已加入白名單' : '已移出白名單' };
+  return {
+    ok: true,
+    message: allowed
+      ? cooling
+        ? `已加入白名單。${hours} 小時內的付款仍要你核准，之後在額度內才會自動付`
+        : '已加入白名單'
+      : '已移出白名單',
+  };
 }

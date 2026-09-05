@@ -1,4 +1,6 @@
 import { NextResponse } from 'next/server';
+import { toggleAllowlistAction } from '@/app/guardian/actions';
+import { loadDemo, payeeById } from '@/lib/demo';
 import { approvePayment, rejectPayment } from '@/lib/execute';
 import { checkGuardian } from '@/lib/guardian-auth';
 import { rateGuard } from '@/lib/rate-limit';
@@ -10,13 +12,19 @@ export const dynamic = 'force-dynamic';
 /**
  * GET  /api/guardian  → 待核准清單（也要帶 token：等待中的付款會露出金額與收款人）
  * POST /api/guardian  → { paymentId, action: "approve" | "reject" }
+ *                     → { action: "allowlist", payeeId, allowed }   調白名單（跟守護者頁的按鈕同一條路）
  *
  * 這是整個系統唯一能把 `hold` 變成 `executed` 的入口，所以它是最該被守住的一支。
  * 核准跳過的只有「核准門檻」那一道，其餘五道照舊 —— 家人能做的是同意這個金額，
  * 不是解除所有限制。
  */
 
-type Body = { paymentId?: string; action?: 'approve' | 'reject' };
+type Body = {
+  paymentId?: string;
+  action?: 'approve' | 'reject' | 'allowlist';
+  payeeId?: string;
+  allowed?: boolean;
+};
 
 export async function GET(request: Request) {
   const limited = rateGuard(request, 'guardian');
@@ -48,9 +56,23 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: false, error: 'body 不是合法的 JSON' }, { status: 400 });
   }
 
+  if (body.action === 'allowlist') {
+    if (typeof body.payeeId !== 'string' || typeof body.allowed !== 'boolean') {
+      return NextResponse.json(
+        { ok: false, error: 'allowlist 要給 payeeId 與 allowed（布林）' },
+        { status: 400 },
+      );
+    }
+    if (!payeeById(loadDemo(), body.payeeId)) {
+      return NextResponse.json({ ok: false, error: '名單裡沒有這個收款人' }, { status: 404 });
+    }
+    const result = await toggleAllowlistAction(body.payeeId, body.allowed);
+    return NextResponse.json(result, { status: result.ok ? 200 : 400 });
+  }
+
   if (!body.paymentId || (body.action !== 'approve' && body.action !== 'reject')) {
     return NextResponse.json(
-      { ok: false, error: '要給 paymentId 與 action（approve 或 reject）' },
+      { ok: false, error: '要給 paymentId 與 action（approve、reject 或 allowlist）' },
       { status: 400 },
     );
   }
