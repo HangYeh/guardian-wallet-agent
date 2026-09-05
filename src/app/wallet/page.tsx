@@ -181,7 +181,7 @@ export default async function WalletPage() {
         </table>
       </div>
 
-      <h2 className="mt-8 mb-3 text-[1.05rem] font-bold">紅隊按鈕</h2>
+      <h2 id="redteam" className="mt-8 mb-3 scroll-mt-4 text-[1.05rem] font-bold">紅隊按鈕</h2>
       <p className="mb-3 max-w-[62ch] text-[0.88rem] text-[var(--color-ink-2)]">
         假設鏈下全部被攻破了 —— 錢還出得去嗎？
       </p>

@@ -2,6 +2,7 @@ import type { AuditEvent, Payee, Payment, PaymentIntent, Policy, TraceStep } fro
 import { clearAuditFile } from '@/lib/audit';
 import { resetBus } from '@/lib/bus';
 import { loadDemo, reloadDemo } from '@/lib/demo';
+import { clearParseCache } from '@/lib/parser';
 
 /**
  * 執行期狀態。M0.3 只放骨架與重置，實際寫入從 M2.4 開始。
@@ -63,6 +64,9 @@ export function resetAll(): { state: RuntimeState; scenarios: string[] } {
   // mock 錢包的餘額、日累計、已用過的冪等鍵也要一起回到起點，
   // 否則舞台上第二次演幕一會被自己的防重放擋下來。
   (globalThis as { __guardianWallet?: unknown }).__guardianWallet = undefined;
+  // 模型的解析快取也清掉。留著的話，重置後再演幕一，軌跡上寫的是「直接用快取結果」——
+  // 台下看起來像門神沒有真的讀那張帳單。重置就是回到起點，包括這個。
+  clearParseCache();
   const demo = reloadDemo();
   return { state: g.__guardianState, scenarios: demo.scenarios.map((s) => s.id) };
 }

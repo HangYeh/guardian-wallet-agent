@@ -105,6 +105,16 @@ describe('白名單增減', () => {
   });
 });
 
+describe('一鍵重置', () => {
+  it('也清掉模型的解析快取：重置後再演同一幕是真的重讀，不是拿上一次的答案', () => {
+    const host = globalThis as { __guardianParseCache?: Map<string, unknown> };
+    host.__guardianParseCache?.set('text:fake', { engine: 'llm' });
+    expect(host.__guardianParseCache?.size).toBeGreaterThan(0);
+    resetAll();
+    expect(host.__guardianParseCache?.size).toBe(0);
+  });
+});
+
 describe('白名單的時間戳與冷卻期', () => {
   // 台北 10:00，白天，不會撞到安靜時段。
   const T0 = new Date('2026-09-05T02:00:00.000Z');

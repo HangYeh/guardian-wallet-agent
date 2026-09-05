@@ -16,7 +16,14 @@ const LOOK: Record<FindingType, { action: string; color: string; counted: boolea
   due_soon: { action: '門神會自動繳', color: 'var(--color-celadon)', counted: false },
 };
 
-export default function AuditPage() {
+type Search = Record<string, string | string[] | undefined>;
+
+export default async function AuditPage({ searchParams }: { searchParams: Promise<Search> }) {
+  // demo bar 的「幕四 週報」帶 ?play=weekly 過來：一到這一頁就唸。
+  // `n` 是流水號，連按兩次也唸兩次 —— key 換了，播放鍵就重掛、重新自動播。
+  const q = await searchParams;
+  const playWeekly = q.play === 'weekly';
+  const playKey = playWeekly ? `play-${typeof q.n === 'string' ? q.n : '0'}` : 'idle';
   const demo = loadDemo();
   // 刻意讀檔案而不是讀記憶體：檔案才是證據。
   // 有人手動改了 data/audit.jsonl，這一頁就該指出來 —— 讀記憶體是看不到的。
@@ -98,7 +105,12 @@ export default function AuditPage() {
           <div className="label mb-1">唸給{demo.persona.elder.name}聽的版本</div>
           {report.narrative}
           <div className="mt-3">
-            <SpeakButton request={{ kind: 'weekly' }} label={`唸給${demo.persona.elder.name}聽`} />
+            <SpeakButton
+              key={playKey}
+              request={{ kind: 'weekly' }}
+              label={`唸給${demo.persona.elder.name}聽`}
+              autoplay={playWeekly}
+            />
           </div>
         </div>
       </div>

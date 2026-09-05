@@ -1,3 +1,4 @@
+import { Suspense } from 'react';
 import ElderConsole from '@/components/ElderConsole';
 import { effectivePolicy } from '@/lib/store';
 import { loadDemo, formatTWD } from '@/lib/demo';
@@ -18,7 +19,10 @@ export default function ElderPage() {
         拿不準的事情它會先問{demo.persona.guardian.name}。
       </p>
 
-      <ElderConsole />
+      {/* 操作台會讀網址上的 ?play=（劇本按鈕）；useSearchParams 要有 Suspense 邊界 */}
+      <Suspense fallback={null}>
+        <ElderConsole />
+      </Suspense>
 
       <h2 className="mt-9 mb-3 text-[1.05rem] font-bold">這個月的狀況</h2>
 

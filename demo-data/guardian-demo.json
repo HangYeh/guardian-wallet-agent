@@ -529,7 +529,7 @@
       },
       "expected": {
         "action": "hold",
-        "riskLevel": "low",
+        "riskLevel": "medium",
         "amount": 3000
       }
     },

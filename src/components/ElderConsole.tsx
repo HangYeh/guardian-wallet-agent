@@ -1,7 +1,10 @@
 'use client';
 
-import { useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { SpeakButton, useSpeech } from '@/components/Speak';
+import { onDemoSignal } from '@/lib/demo-signal';
+import { sceneById } from '@/lib/scenes';
 
 /**
  * 阿嬤的操作台。三顆鍵，其他什麼都沒有。
@@ -164,7 +167,7 @@ export default function ElderConsole() {
   // 第三顆鍵：唸這個月的週報。字是伺服器算的，這裡只負責按與放。
   const weekly = useSpeech();
 
-  async function send(body: Record<string, unknown>, previewUrl: string | null) {
+  const send = useCallback(async (body: Record<string, unknown>, previewUrl: string | null) => {
     setBusy(true);
     setResult(null);
     setPreview(previewUrl);
@@ -184,7 +187,45 @@ export default function ElderConsole() {
       setElapsed(Date.now() - started);
       setBusy(false);
     }
-  }
+  }, []);
+
+  // ---- 劇本按鈕：網址上帶 ?play=<幕>，看到就開演 ----
+  //
+  // 按鈕在 demo bar 上、每一頁都有；它只負責把人帶來這一頁、在網址上寫要演哪一幕。
+  // 開演後把參數從網址拿掉：重新整理不該再演一次。`n` 是流水號，同一幕連按兩次也算兩次。
+  const params = useSearchParams();
+  const play = params.get('play');
+  const nonce = params.get('n');
+  const playedRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!play) return;
+    const key = `${play}#${nonce ?? ''}`;
+    if (playedRef.current === key) return;
+    const scene = sceneById(play);
+    if (!scene || scene.page !== '/') return;
+    // 排到下一個 tick 再開演，而不是在 effect 裡直接呼叫：send 會連環 setState，
+    // React 不准在 effect 本體裡同步做這件事。「演過了」的記號也留到真的開演那一刻才蓋，
+    // 這樣 dev 模式 effect 被跑兩次（StrictMode）時，被取消的那一次不會把記號先用掉。
+    const id = setTimeout(() => {
+      if (playedRef.current === key) return;
+      playedRef.current = key;
+      window.history.replaceState(null, '', window.location.pathname);
+      void send({ scenarioId: scene.id }, scene.preview ?? null);
+    }, 0);
+    return () => clearTimeout(id);
+  }, [play, nonce, send]);
+
+  // ---- 一鍵重置：伺服器清了，畫面也要清，不然上一幕的判決還掛在台上 ----
+  useEffect(
+    () =>
+      onDemoSignal(() => {
+        setResult(null);
+        setPreview(null);
+        setPasting(false);
+        setText('');
+      }),
+    [],
+  );
 
   async function onPick(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
