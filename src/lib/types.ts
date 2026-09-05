@@ -265,8 +265,10 @@ export type Finding = {
   confidence: number; // 0–1
   evidence: {
     txIds: string[];
+    /** 哪一條規則、依據什麼判的。給人看的完整句子。 */
     rule: string;
-    llmReason: string;
+    /** 模型的補充說明。異常偵測是純規則的（M5.1），所以通常沒有。 */
+    llmReason?: string;
   };
 };
 
