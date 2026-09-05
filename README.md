@@ -258,7 +258,7 @@ guardian-wallet-agent/
 | 後端 | Next.js route handlers、TypeScript 5、Node.js 22+ | 門神管線、政策引擎、稽核雜湊鏈、速率限制 |
 | 鏈 | Solidity 0.8、OpenZeppelin Contracts 5、Hardhat 3、viem 2 | GuardedWallet / TWDStable、部署、三模式錢包 adapter |
 | 網路 | Base Sepolia（chainId 84532）、Hardhat 本地節點 | 測試網結算、舞台用本地鏈 |
-| 測試 | vitest 5、Hardhat test（node:test） | 380 條單元測試（20 檔）+ 21 條合約測試 |
+| 測試 | vitest 5、Hardhat test（node:test） | 384 條單元測試（20 檔）+ 21 條合約測試 |
 | Sponsor 技術 | OpenAI、ElevenLabs | 如上；國泰金控為命題方 |
 
 ---
@@ -266,6 +266,8 @@ guardian-wallet-agent/
 ## 安裝與執行
 
 需要 Node.js 22 以上（開發用 26.4）與 npm。Windows、macOS、Linux 都可以。
+
+> 裝好之後按哪裡、應該看到什麼、看到不一樣的東西怎麼辦：[docs/DEMO.md 五分鐘試玩指南](docs/DEMO.md)。
 
 ### 一、最快：離線模式，不需要任何金鑰
 
@@ -317,7 +319,7 @@ npm run chain:deploy        # 終端機 2：部署 tTWD + GuardedWallet，灌政
 ### 測試與檢查
 
 ```bash
-npm test                # vitest：380 條，含 pipeline.test.ts 離線整跑六幕 + 核准 + 週報 + 重置重跑
+npm test                # vitest：384 條，含 pipeline.test.ts 離線整跑六幕 + 核准 + 週報 + 重置重跑
 npm run chain:test      # Hardhat：21 條合約測試
 npm run lint && npm run typecheck
 npm run scan:secrets    # 掃工作目錄與 git 全歷史有沒有金鑰
@@ -330,6 +332,7 @@ npm run scan:secrets    # 掃工作目錄與 git 全歷史有沒有金鑰
 ## 作品展示
 
 - **評選影片**：（YouTube 連結於繳件時補上）
+- **試玩指南**：[docs/DEMO.md](docs/DEMO.md)，照劇本按，每一幕應該看到什麼都寫在裡面。
 - **作品展示網址**：無公開部署。守護者端點與 operator 金鑰不該放在公網上，請依上方步驟在本機執行，離線模式一分鐘內可跑。
 
 ### 四幕劇本
