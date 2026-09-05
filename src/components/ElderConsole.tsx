@@ -366,7 +366,7 @@ export default function ElderConsole() {
       {result?.ok && f && i && (
         <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,15rem)_1fr]">
           {preview && (
-            <div className="card overflow-hidden p-0">
+            <div className="card self-start overflow-hidden p-0">
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src={preview} alt="剛剛送出的帳單" className="block w-full" />
             </div>
