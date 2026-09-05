@@ -1,4 +1,5 @@
 import { AllowlistToggle, ApprovalButtons, PolicyForm } from '@/components/GuardianControls';
+import GuardianLive from '@/components/GuardianLive';
 import { loadDemo, formatTWD, payeeById } from '@/lib/demo';
 import { effectivePolicy, state } from '@/lib/store';
 
@@ -18,12 +19,72 @@ function decisionOf(paymentId: string): { summary: string; rulesHit: string[] } 
   return { summary: e.summary, rulesHit: Array.isArray(hits) ? (hits as string[]) : [] };
 }
 
+/**
+ * 給家人的通知：門神擋下了什麼。
+ *
+ * 攔截那一刻阿嬤看得到，但**家人不在場**。這幾張卡片是整個作品裡唯一
+ * 主動告訴家人「你媽剛剛被詐騙集團找上了」的地方 —— 防詐系統擋掉一筆
+ * 卻沒人知道，跟沒擋一樣，因為下一通電話還是會打來。
+ *
+ * 一樣從稽核鏈讀，不另存一份（理由同 `decisionOf`）。
+ */
+type Alert = {
+  id: string;
+  at: string;
+  summary: string;
+  rulesHit: string[];
+  payee?: string;
+  /** 對方**開口要**的金額。不是 payment.amount —— 見下面。 */
+  requested?: number;
+  /** 授權信封實際封上去的上限。兩個數字不一樣時要一起講。 */
+  capped?: number;
+};
+
+function blockedAlerts(limit = 5): Alert[] {
+  const s = state();
+  return s.audit
+    // 紅隊按鈕也寫 payment.blocked，但那是我們自己按的，不是有人來騙秀英。
+    // 混進來的話這張卡會說「你媽剛剛被詐騙集團找上了」，而那是假的。
+    .filter((e) => e.type === 'payment.blocked' && !String(e.details.source ?? '').startsWith('redteam'))
+    .slice(-limit)
+    .reverse()
+    .map((e) => {
+      const payment = s.payments.find((p) => p.id === e.paymentId);
+      const intent = s.intents.find((x) => x.id === e.intentId);
+      const hits = e.details.rulesHit;
+      return {
+        id: e.id,
+        at: e.ts,
+        summary: e.summary,
+        rulesHit: Array.isArray(hits) ? (hits as string[]) : [],
+        payee: payment?.payee.name,
+        // 這裡要的是**對方開口要的金額**，不是 payment.amount。
+        // payment.amount 已經被授權信封壓到 min(讀到的金額, 單筆上限) ——
+        // 幕二那則詐騙要 50,000，信封封成 3,000，卡片若寫 3,000 就是
+        // 在唯一告訴家人「你媽被盯上了」的地方**把規模低報了十六倍**。
+        requested: intent?.amount ?? payment?.amount,
+        capped: payment?.amount,
+      };
+    });
+}
+
+/** 台北時間的時：分。稽核事件存的是 UTC。 */
+function hhmm(iso: string): string {
+  return new Date(iso).toLocaleTimeString('zh-TW', {
+    timeZone: 'Asia/Taipei',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  });
+}
+
 export default function GuardianPage() {
   const demo = loadDemo();
   const { persona } = demo;
   // 讀「現在生效的」政策，不是劇本檔裡的原始值 —— 守護者改過就要看得到。
   const policy = effectivePolicy();
   const pending = state().payments.filter((p) => p.status === 'pending_approval');
+  const alerts = blockedAlerts();
 
   const rules: { label: string; value: string; note: string }[] = [
     { label: '單筆上限', value: formatTWD(policy.perTxCap), note: '超過就直接拒付，合約層強制' },
@@ -45,7 +106,71 @@ export default function GuardianPage() {
         規則不是寫在程式裡，是寫進鏈上合約，所以就算門神被騙，超出規則的錢也出不去。
       </p>
 
-      <h2 className="mb-3 text-[1.05rem] font-bold">等你核准</h2>
+      {/* ---- 門神的通知：擋下來的事家人要知道 ---- */}
+      {alerts.length > 0 && (
+        <section className="mb-8">
+          <div className="mb-3 flex items-baseline gap-3">
+            <h2 className="text-[1.05rem] font-bold">門神的通知</h2>
+            <span className="pill" style={{ color: 'var(--color-cinnabar)' }}>
+              {alerts.length} 則
+            </span>
+          </div>
+          <div className="flex flex-col gap-3">
+            {alerts.map((a) => (
+              <div
+                key={a.id}
+                className="card p-5"
+                style={{
+                  borderLeft: '6px solid var(--color-cinnabar)',
+                  background: 'var(--color-cinnabar-bg)',
+                }}
+              >
+                <div className="flex flex-wrap items-baseline justify-between gap-3">
+                  <span className="text-[1.15rem] font-bold">
+                    有人向{persona.elder.name}要
+                    {a.requested != null && (
+                      <>
+                        {' '}
+                        <b className="mono">{a.requested.toLocaleString('zh-TW')}</b> 元
+                      </>
+                    )}
+                    ，門神擋下來了
+                    {a.payee && <>。收款方是「{a.payee}」</>}
+                  </span>
+                  <span className="mono text-[0.75rem] text-[var(--color-ink-2)]">{hhmm(a.at)}</span>
+                </div>
+                <p className="mt-1.5 max-w-[60ch] text-[0.9rem] leading-relaxed">{a.summary}</p>
+                {a.rulesHit.length > 0 && (
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {a.rulesHit.map((r) => (
+                      <span key={r} className="pill mono text-[0.7rem]">
+                        {r}
+                      </span>
+                    ))}
+                  </div>
+                )}
+                <p className="mt-2 text-[0.78rem] text-[var(--color-ink-2)]">
+                  錢沒有出去，不必做任何事。建議打個電話給{persona.elder.name}，
+                  同一批人通常會再打第二通。
+                  {a.capped != null && a.requested != null && a.capped < a.requested && (
+                    <>
+                      {' '}
+                      （就算門神當時判錯，授權信封也只封了{' '}
+                      <span className="mono">{a.capped.toLocaleString('zh-TW')}</span> 元，
+                      最多只會付出這個數。）
+                    </>
+                  )}
+                </p>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
+      <div className="mb-3 flex items-baseline gap-3">
+        <h2 className="text-[1.05rem] font-bold">等你核准</h2>
+        <GuardianLive />
+      </div>
       {pending.length === 0 ? (
         <div className="card p-5 text-[0.88rem] text-[var(--color-ink-2)]">
           目前沒有待核准項目。幕三的孫子紅包會出現在這裡，因為收款人不在白名單。

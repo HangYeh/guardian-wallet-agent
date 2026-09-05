@@ -141,7 +141,7 @@ export async function POST(request: Request) {
       type: 'payment.executed',
       actor: 'chain',
       summary: `⚠ 紅隊「${ATTACKS[attack]}」竟然成功了`,
-      details: { attack, txHash: receipt.txHash, amount: args.amount },
+      details: { attack, txHash: receipt.txHash, amount: args.amount, source: 'redteam-api' },
       memoHash: args.memoHash,
     });
 
@@ -160,7 +160,7 @@ export async function POST(request: Request) {
       type: 'payment.blocked',
       actor: 'chain',
       summary: `紅隊「${ATTACKS[attack]}」被合約擋下：${reason}`,
-      details: { attack, reason, amount: args.amount, chainMode: currentChainMode() },
+      details: { attack, reason, amount: args.amount, chainMode: currentChainMode(), source: 'redteam-api' },
       memoHash: args.memoHash,
     });
 

@@ -1,3 +1,4 @@
+import RedTeamPanel from '@/components/RedTeamPanel';
 import { currentChainMode } from '@/lib/intent';
 import { loadDemo, formatTWD } from '@/lib/demo';
 import { effectivePolicy, state } from '@/lib/store';
@@ -179,6 +180,12 @@ export default async function WalletPage() {
           </tbody>
         </table>
       </div>
+
+      <h2 className="mt-8 mb-3 text-[1.05rem] font-bold">紅隊按鈕</h2>
+      <p className="mb-3 max-w-[62ch] text-[0.88rem] text-[var(--color-ink-2)]">
+        假設鏈下全部被攻破了 —— 錢還出得去嗎？
+      </p>
+      <RedTeamPanel enabled={process.env.ENABLE_REDTEAM === 'true'} />
 
       <h2 className="mt-8 mb-3 text-[1.05rem] font-bold">交易紀錄</h2>
       {payments.length === 0 ? (
