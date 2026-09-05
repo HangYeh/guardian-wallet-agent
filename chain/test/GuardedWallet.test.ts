@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { network } from 'hardhat';
+import { encodeAbiParameters, keccak256, toBytes } from 'viem';
 
 /**
  * GuardedWallet 的合約測試。
@@ -22,9 +23,43 @@ const APPROVAL_THRESHOLD = 2000n;
 const INITIAL_BALANCE = 100_000n;
 const TTL = 900n; // 意圖效期 15 分鐘，跟鏈下的 INTENT_TTL_MS 一致
 
-/** 測試用的冪等鍵。鏈下是 keccak256("taskId|merchant|amount|assetNetwork")。 */
-function memo(n: number): `0x${string}` {
-  return `0x${n.toString(16).padStart(64, '0')}`;
+const NET = keccak256(toBytes('tTWD@eip155:31337'));
+
+/** 任務代號的雜湊。同一個 n 就是同一個任務。 */
+function task(n: number): `0x${string}` {
+  return keccak256(toBytes(`task-${n}`));
+}
+
+/**
+ * 鏈下算出來的 memoHash。
+ *
+ * **這裡刻意用 viem 自己算一遍，而不是呼叫合約的 `intentHash()`** ——
+ * 那樣等於拿合約去驗合約，公式寫錯也驗不出來。這一份是 `src/lib/intent.ts`
+ * 的 `intentHash()` 的第三份實作，下面第 14 條會把三邊釘在一起。
+ */
+function memoFor(payee: `0x${string}`, amount: bigint, n: number): `0x${string}` {
+  return keccak256(
+    encodeAbiParameters(
+      [{ type: 'bytes32' }, { type: 'address' }, { type: 'uint256' }, { type: 'bytes32' }],
+      [task(n), payee, amount, NET],
+    ),
+  );
+}
+
+/** pay() 的完整參數。memoHash 現在必須描述這一筆，不能隨手捏一串。 */
+function payArgs(payee: `0x${string}`, amount: bigint, n: number, expiresAt: bigint) {
+  return [payee, amount, memoFor(payee, amount, n), task(n), NET, expiresAt] as const;
+}
+
+/** propose() 的完整參數。 */
+function proposeArgs(
+  payee: `0x${string}`,
+  amount: bigint,
+  n: number,
+  expiresAt: bigint,
+  reason: string,
+) {
+  return [payee, amount, memoFor(payee, amount, n), task(n), NET, expiresAt, reason] as const;
 }
 
 async function deploy() {
@@ -55,7 +90,7 @@ describe('GuardedWallet', () => {
     const { token, wallet, operator, payee } = await networkHelpers.loadFixture(deploy);
     const expiresAt = await soon();
 
-    const tx = await wallet.write.pay([payee.account.address, 1200n, memo(1), expiresAt], {
+    const tx = await wallet.write.pay(payArgs(payee.account.address, 1200n, 1, expiresAt), {
       account: operator.account,
     });
 
@@ -63,7 +98,7 @@ describe('GuardedWallet', () => {
       2n ** 256n - 1n, // 直接付款沒有提案編號，用哨兵值
       payee.account.address,
       1200n,
-      memo(1),
+      memoFor(payee.account.address, 1200n, 1),
       operator.account.address,
     ]);
 
@@ -77,7 +112,7 @@ describe('GuardedWallet', () => {
     const { wallet, operator, stranger } = await networkHelpers.loadFixture(deploy);
 
     await viem.assertions.revertWith(
-      wallet.write.pay([stranger.account.address, 100n, memo(2), await soon()], {
+      wallet.write.pay(payArgs(stranger.account.address, 100n, 2, await soon()), {
         account: operator.account,
       }),
       'PolicyViolation: payee not allowlisted',
@@ -89,7 +124,7 @@ describe('GuardedWallet', () => {
     const { wallet, operator, payee } = await networkHelpers.loadFixture(deploy);
 
     await viem.assertions.revertWith(
-      wallet.write.pay([payee.account.address, PER_TX_CAP + 1n, memo(3), await soon()], {
+      wallet.write.pay(payArgs(payee.account.address, PER_TX_CAP + 1n, 3, await soon()), {
         account: operator.account,
       }),
       'PolicyViolation: per-tx cap exceeded',
@@ -102,14 +137,14 @@ describe('GuardedWallet', () => {
     const amount = APPROVAL_THRESHOLD + 1n;
 
     await viem.assertions.revertWith(
-      wallet.write.pay([payee.account.address, amount, memo(4), await soon()], {
+      wallet.write.pay(payArgs(payee.account.address, amount, 4, await soon()), {
         account: operator.account,
       }),
       'PolicyViolation: guardian approval required',
     );
 
     const tx = await wallet.write.propose(
-      [payee.account.address, amount, memo(4), await soon(), '超過自動繳費門檻，請家人確認'],
+      proposeArgs(payee.account.address, amount, 4, await soon(), '超過自動繳費門檻，請家人確認'),
       { account: operator.account },
     );
     await viem.assertions.emit(tx, wallet, 'PaymentProposed');
@@ -120,16 +155,16 @@ describe('GuardedWallet', () => {
   it('5. 日累計超過單日上限 → revert', async () => {
     const { wallet, operator, payee } = await networkHelpers.loadFixture(deploy);
 
-    await wallet.write.pay([payee.account.address, 2000n, memo(50), await soon()], {
+    await wallet.write.pay(payArgs(payee.account.address, 2000n, 50, await soon()), {
       account: operator.account,
     });
-    await wallet.write.pay([payee.account.address, 2000n, memo(51), await soon()], {
+    await wallet.write.pay(payArgs(payee.account.address, 2000n, 51, await soon()), {
       account: operator.account,
     });
     assert.equal(await wallet.read.remainingToday(), 1000n);
 
     await viem.assertions.revertWith(
-      wallet.write.pay([payee.account.address, 2000n, memo(52), await soon()], {
+      wallet.write.pay(payArgs(payee.account.address, 2000n, 52, await soon()), {
         account: operator.account,
       }),
       'PolicyViolation: daily cap exceeded',
@@ -141,7 +176,7 @@ describe('GuardedWallet', () => {
     const { token, wallet, guardian, operator, payee } = await networkHelpers.loadFixture(deploy);
 
     await wallet.write.propose(
-      [payee.account.address, 2500n, memo(6), await soon(), '紅包'],
+      proposeArgs(payee.account.address, 2500n, 6, await soon(), '紅包'),
       { account: operator.account },
     );
     const tx = await wallet.write.approve([0n], { account: guardian.account });
@@ -159,7 +194,7 @@ describe('GuardedWallet', () => {
     const { token, wallet, guardian, operator, payee } = await networkHelpers.loadFixture(deploy);
 
     await wallet.write.propose(
-      [payee.account.address, 2500n, memo(60), await soon(), '可疑的轉帳'],
+      proposeArgs(payee.account.address, 2500n, 60, await soon(), '可疑的轉帳'),
       { account: operator.account },
     );
     const tx = await wallet.write.reject([0n, '不認識這個人'], { account: guardian.account });
@@ -170,7 +205,7 @@ describe('GuardedWallet', () => {
     // 拒絕會把冪等鍵一起燒掉：代理重送一模一樣的東西不會重新排隊
     await viem.assertions.revertWith(
       wallet.write.propose(
-        [payee.account.address, 2500n, memo(60), await soon(), '再試一次'],
+        proposeArgs(payee.account.address, 2500n, 60, await soon(), '再試一次'),
         { account: operator.account },
       ),
       'Replay: intent already settled',
@@ -184,14 +219,14 @@ describe('GuardedWallet', () => {
 
     // guardian 自己也不能用 operator 的入口 —— 這不是疏忽，是刻意的職責分離
     await viem.assertions.revertWith(
-      wallet.write.pay([payee.account.address, 100n, memo(7), await soon()], {
+      wallet.write.pay(payArgs(payee.account.address, 100n, 7, await soon()), {
         account: guardian.account,
       }),
       'Unauthorized: operator only',
     );
 
     await wallet.write.propose(
-      [payee.account.address, 2500n, memo(70), await soon(), '待核准'],
+      proposeArgs(payee.account.address, 2500n, 70, await soon(), '待核准'),
       { account: operator.account },
     );
 
@@ -209,7 +244,7 @@ describe('GuardedWallet', () => {
       await networkHelpers.loadFixture(deploy);
 
     // 換鑰匙前舊的可以用
-    await wallet.write.pay([payee.account.address, 100n, memo(80), await soon()], {
+    await wallet.write.pay(payArgs(payee.account.address, 100n, 80, await soon()), {
       account: operator.account,
     });
 
@@ -223,14 +258,14 @@ describe('GuardedWallet', () => {
 
     // 金鑰外洩時家人的第一個動作：換掉。舊的立刻付不出去。
     await viem.assertions.revertWith(
-      wallet.write.pay([payee.account.address, 100n, memo(81), await soon()], {
+      wallet.write.pay(payArgs(payee.account.address, 100n, 81, await soon()), {
         account: operator.account,
       }),
       'Unauthorized: operator only',
     );
 
     // 新的可以
-    await wallet.write.pay([payee.account.address, 100n, memo(82), await soon()], {
+    await wallet.write.pay(payArgs(payee.account.address, 100n, 82, await soon()), {
       account: stranger.account,
     });
   });
@@ -239,12 +274,12 @@ describe('GuardedWallet', () => {
   it('9. 同一把冪等鍵付第二次 → revert（逾時重試不會變成第二筆付款）', async () => {
     const { token, wallet, operator, payee } = await networkHelpers.loadFixture(deploy);
 
-    await wallet.write.pay([payee.account.address, 1200n, memo(9), await soon()], {
+    await wallet.write.pay(payArgs(payee.account.address, 1200n, 9, await soon()), {
       account: operator.account,
     });
 
     await viem.assertions.revertWith(
-      wallet.write.pay([payee.account.address, 1200n, memo(9), await soon()], {
+      wallet.write.pay(payArgs(payee.account.address, 1200n, 9, await soon()), {
         account: operator.account,
       }),
       'Replay: intent already settled',
@@ -260,7 +295,7 @@ describe('GuardedWallet', () => {
     const { token, wallet, guardian, operator, payee } = await networkHelpers.loadFixture(deploy);
 
     await wallet.write.propose(
-      [payee.account.address, 2500n, memo(10), await soon(), '紅包'],
+      proposeArgs(payee.account.address, 2500n, 10, await soon(), '紅包'),
       { account: operator.account },
     );
     await wallet.write.approve([0n], { account: guardian.account });
@@ -279,7 +314,7 @@ describe('GuardedWallet', () => {
     const expiresAt = BigInt(await networkHelpers.time.latest()) - 1n;
 
     await viem.assertions.revertWith(
-      wallet.write.pay([payee.account.address, 100n, memo(11), expiresAt], {
+      wallet.write.pay(payArgs(payee.account.address, 100n, 11, expiresAt), {
         account: operator.account,
       }),
       'PolicyViolation: intent expired',
@@ -291,7 +326,7 @@ describe('GuardedWallet', () => {
     const { token, wallet, guardian, operator, payee } = await networkHelpers.loadFixture(deploy);
 
     await wallet.write.propose(
-      [payee.account.address, 2500n, memo(12), await soon(), '深夜的紅包'],
+      proposeArgs(payee.account.address, 2500n, 12, await soon(), '深夜的紅包'),
       { account: operator.account },
     );
 
@@ -313,7 +348,7 @@ describe('GuardedWallet', () => {
 
     // 不在白名單的人，經過核准付得出去 —— 家人點頭本身就是授權
     await wallet.write.propose(
-      [stranger.account.address, 2500n, memo(13), await soon(), '第一次付給這個人'],
+      proposeArgs(stranger.account.address, 2500n, 13, await soon(), '第一次付給這個人'),
       { account: operator.account },
     );
     await wallet.write.approve([0n], { account: guardian.account });
@@ -322,7 +357,7 @@ describe('GuardedWallet', () => {
     // 但超過單筆上限的提案根本建不起來
     await viem.assertions.revertWith(
       wallet.write.propose(
-        [stranger.account.address, PER_TX_CAP + 1n, memo(130), await soon(), '五萬'],
+        proposeArgs(stranger.account.address, PER_TX_CAP + 1n, 130, await soon(), '五萬'),
         { account: operator.account },
       ),
       'PolicyViolation: per-tx cap exceeded',
@@ -339,5 +374,114 @@ describe('GuardedWallet', () => {
 
     const tx = await wallet.write.setPolicy([4000n, 6000n, 1500n], { account: guardian.account });
     await viem.assertions.emitWithArgs(tx, wallet, 'PolicyUpdated', [4000n, 6000n, 1500n]);
+  });
+
+  // ── 15：意圖綁定（9/5 加）───────────────────────────────────────────
+  //
+  // 在這之前 memoHash 只是一把不透明的去重鍵：合約收到就寫進 usedIntent，
+  // 從不檢查它是否真的描述這次的收款人與金額。所以
+  // `pay(小宇, 3000, 台電那筆的 memoHash)` 會被照付，鏈上留下一筆對不起來的紀錄。
+  //
+  // 補上之後能講的是：拿到 operator 金鑰的人在額度內還是能偷錢（六道 require
+  // 擋的是金額，不是身分），但他**沒辦法讓鏈上的紀錄說謊**。
+  // 演講 Slide 26：Signatures must bind to one task and purchase。
+
+  it('15a. memoHash 描述另一個金額 → revert', async () => {
+    const { wallet, operator, payee } = await networkHelpers.loadFixture(deploy);
+    const addr = payee.account.address;
+
+    // 想付 1200，但送一把描述「1 元」的 memoHash
+    await viem.assertions.revertWith(
+      wallet.write.pay(
+        [addr, 1200n, memoFor(addr, 1n, 200), task(200), NET, await soon()],
+        { account: operator.account },
+      ),
+      'IntentMismatch: memo does not describe this payment',
+    );
+  });
+
+  it('15b. memoHash 描述另一個收款人 → revert', async () => {
+    const { wallet, operator, payee, stranger } = await networkHelpers.loadFixture(deploy);
+
+    await viem.assertions.revertWith(
+      wallet.write.pay(
+        [
+          payee.account.address,
+          1200n,
+          memoFor(stranger.account.address, 1200n, 201),
+          task(201),
+          NET,
+          await soon(),
+        ],
+        { account: operator.account },
+      ),
+      'IntentMismatch: memo does not describe this payment',
+    );
+  });
+
+  it('15c. propose 也擋 —— 不然偽造的授權可以排隊等家人按下去', async () => {
+    const { wallet, operator, payee } = await networkHelpers.loadFixture(deploy);
+    const addr = payee.account.address;
+
+    await viem.assertions.revertWith(
+      wallet.write.propose(
+        [addr, 2500n, memoFor(addr, 1n, 202), task(202), NET, await soon(), '紅包'],
+        { account: operator.account },
+      ),
+      'IntentMismatch: memo does not describe this payment',
+    );
+  });
+
+  it('15d. intentHash 是 public —— 評審拿稽核檔的四個欄位就能自己驗', async () => {
+    const { wallet, payee } = await networkHelpers.loadFixture(deploy);
+    const addr = payee.account.address;
+
+    // 鏈上算的 == viem 算的（memoFor）== src/lib/intent.ts 的 intentHash()。
+    // 三份實作釘在一起：任何一邊改了公式，這一條就紅。
+    const onChain = await wallet.read.intentHash([addr, 1200n, task(300), NET]);
+    assert.equal(onChain, memoFor(addr, 1200n, 300));
+  });
+
+  // ── 16：日界線（9/5 改）────────────────────────────────────────────
+  //
+  // 位移前 `block.timestamp / 1 days` 的日界線落在 UTC 午夜，也就是
+  // **台北早上八點** —— 家人設「單日上限 5,000」，實際生效的窗口卻是
+  // 早上八點到隔天早上八點。而鏈下的安靜時段用的是台北時間，
+  // 同一份政策裡兩種「一天」。
+
+  it('16a. 日界線在台北午夜，不是 UTC 午夜', async () => {
+    const { wallet } = await networkHelpers.loadFixture(deploy);
+
+    // 2026-09-05 15:59:59 UTC = 台北 9/5 23:59:59
+    const beforeMidnight = 1789660799n;
+    // 2026-09-05 16:00:00 UTC = 台北 9/6 00:00:00
+    const afterMidnight = 1789660800n;
+
+    const a = await wallet.read.dayIndex([beforeMidnight]);
+    const b = await wallet.read.dayIndex([afterMidnight]);
+    assert.equal(b, a + 1n, '台北跨午夜要換一天');
+
+    // 台北同一天的早上八點前後不該換天（那正是位移前的錯誤行為）
+    const eightAm = 1789603200n; // 2026-09-05 00:00:00 UTC = 台北 08:00
+    assert.equal(await wallet.read.dayIndex([eightAm - 1n]), await wallet.read.dayIndex([eightAm]));
+  });
+
+  it('16b. 跨過台北午夜之後單日額度重置', async () => {
+    const { wallet, operator, payee } = await networkHelpers.loadFixture(deploy);
+    const addr = payee.account.address;
+
+    // 每筆都在核准門檻（2,000）以內，才會走 operator 直接付的那條路
+    await wallet.write.pay(payArgs(addr, 2000n, 400, await soon()), { account: operator.account });
+    await wallet.write.pay(payArgs(addr, 2000n, 401, await soon()), { account: operator.account });
+
+    // 已經用掉 4,000，再付 1,500 會超過單日的 5,000
+    await viem.assertions.revertWith(
+      wallet.write.pay(payArgs(addr, 1500n, 402, await soon()), { account: operator.account }),
+      'PolicyViolation: daily cap exceeded',
+    );
+
+    await networkHelpers.time.increase(86_400);
+    await wallet.write.pay(payArgs(addr, 100n, 403, await soon()), { account: operator.account });
+    assert.equal(await wallet.read.remainingToday(), DAILY_CAP - 100n);
   });
 });

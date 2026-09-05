@@ -2,7 +2,9 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
+import { keccak256, toBytes } from 'viem';
 import { loadDemo } from '@/lib/demo';
+import { intentHash } from '@/lib/intent';
 import { effectivePolicy, resetAll, setAllowlisted, state, updatePolicy } from '@/lib/store';
 import { MockWallet, type PayArgs } from '@/lib/wallet';
 
@@ -123,40 +125,39 @@ describe('重置與 mock 錢包的接縫', () => {
     await expect(wallet().isSettled(`0x${'ab'.repeat(32)}`)).resolves.toBe(false);
   });
 
-  it('重置後可以直接付款 —— 這就是舞台上第二次演幕一的路徑', async () => {
-    resetAll();
-    const receipt = await wallet().pay({
-      payee: {
-        id: 'payee_taipower',
-        name: '台灣電力公司',
-        address: '0x9965507D1a55bcC2695C58ba16FB37d819B0A4dc',
-        kind: 'utility',
-        allowlisted: true,
-      },
-      amount: 1280,
-      memoHash: `0x${'11'.repeat(32)}`,
+  const TAIPOWER = {
+    id: 'payee_taipower',
+    name: '台灣電力公司',
+    address: '0x9965507D1a55bcC2695C58ba16FB37d819B0A4dc',
+    kind: 'utility',
+    allowlisted: true,
+  } as const;
+
+  /** 合法的付款參數。memoHash 現在必須真的描述這一筆，不能隨手捏一串。 */
+  function payArgs(taskId: string, amount = 1280): PayArgs {
+    const taskIdHash = keccak256(toBytes(taskId));
+    const assetNetworkHash = keccak256(toBytes('tTWD@eip155:31337'));
+    return {
+      payee: { ...TAIPOWER },
+      amount,
+      taskIdHash,
+      assetNetworkHash,
+      memoHash: intentHash({ taskIdHash, payee: TAIPOWER.address, amount, assetNetworkHash }),
       expiresAt: new Date(Date.now() + 600_000).toISOString(),
       approved: false,
-    });
+    };
+  }
+
+  it('重置後可以直接付款 —— 這就是舞台上第二次演幕一的路徑', async () => {
+    resetAll();
+    const receipt = await wallet().pay(payArgs('bill-2026-09-taipower'));
     expect(receipt.txHash).toMatch(/^0x[0-9a-f]{64}$/);
     await expect(wallet().spentToday()).resolves.toBe(1280);
   });
 
   it('付過款再重置，日累計與防重放都回到起點（不然第二次演出會被自己擋下來）', async () => {
-    const memoHash = `0x${'22'.repeat(32)}` as const;
-    const args: PayArgs = {
-      payee: {
-        id: 'payee_taipower',
-        name: '台灣電力公司',
-        address: '0x9965507D1a55bcC2695C58ba16FB37d819B0A4dc',
-        kind: 'utility',
-        allowlisted: true,
-      },
-      amount: 1280,
-      memoHash,
-      expiresAt: new Date(Date.now() + 600_000).toISOString(),
-      approved: false,
-    };
+    const args = payArgs('bill-2026-08-taipower');
+    const memoHash = args.memoHash;
 
     await wallet().pay(args);
     await expect(wallet().isSettled(memoHash)).resolves.toBe(true);

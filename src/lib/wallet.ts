@@ -1,5 +1,5 @@
 import { keccak256, toBytes } from 'viem';
-import { currentChainMode } from '@/lib/intent';
+import { currentChainMode, intentHash } from '@/lib/intent';
 import { ChainWallet, loadDeployment } from '@/lib/wallet-chain';
 import type { ChainMode, Payee, Policy } from '@/lib/types';
 
@@ -18,6 +18,14 @@ export type PayArgs = {
   payee: Payee;
   amount: number;
   memoHash: `0x${string}`;
+  /**
+   * 意圖的 `taskId` 與 `assetNetwork` 各自的 keccak256。跑 `intentHashParts(intent)` 拿。
+   *
+   * 合約用這兩個加上 `(payee, amount)` 重算一次 memoHash 再比對，所以它們**必須**
+   * 跟著付款一起送上鏈 —— 不是額外的中繼資料，是那把鍵的原料。
+   */
+  taskIdHash: `0x${string}`;
+  assetNetworkHash: `0x${string}`;
   expiresAt: string;
   /**
    * 走守護者核准的那條路（合約的 propose → approve）。
@@ -92,9 +100,22 @@ function mockState(): MockState {
   return (g.__guardianWallet ??= emptyState());
 }
 
-/** 合約用的日索引：`block.timestamp / 1 days`。這裡照抄，兩邊的「今天」才會是同一天。 */
-function dayIndex(now: Date): number {
-  return Math.floor(now.getTime() / 86_400_000);
+/** 台北是 UTC+8。合約的 `TZ_OFFSET` 是同一個值。 */
+const TZ_OFFSET_MS = 8 * 3_600_000;
+
+/**
+ * 某個時刻落在哪一個「台北日」。單日上限的計數桶，對應合約的 `dayIndex()`。
+ *
+ * 不位移的話日界線落在 UTC 午夜，也就是**台北早上八點** —— 家人設「單日上限 5,000」，
+ * 實際生效的窗口卻是早上八點到隔天早上八點。而安靜時段（`policy.ts` 的 `taipeiHour`）
+ * 用的是台北時間，同一份政策裡就有兩種「一天」。
+ *
+ * **導出給 `wallet-chain.ts` 用**：它本來自己抄了一份，於是同一個公式有三份實作
+ * （Solidity 一份、這裡一份、那裡一份）。算錯桶不會爆炸，只會安靜地讀到空的計數，
+ * 讓鏈下政策以為今天還沒花過錢 —— 這種錯最難發現。
+ */
+export function dayIndex(now: Date): number {
+  return Math.floor((now.getTime() + TZ_OFFSET_MS) / 86_400_000);
 }
 
 export class MockWallet implements WalletAdapter {
@@ -128,6 +149,17 @@ export class MockWallet implements WalletAdapter {
   async pay(args: PayArgs, now: Date = new Date()): Promise<PayReceipt> {
     const s = mockState();
 
+    // 第一道，順序照合約：這把 memoHash 真的描述了這筆付款嗎？
+    // mock 少了這一條，mock 模式就演不出這道防線 —— 而 demo 預設跑的正是 mock。
+    const expected = intentHash({
+      taskIdHash: args.taskIdHash,
+      payee: args.payee.address,
+      amount: args.amount,
+      assetNetworkHash: args.assetNetworkHash,
+    });
+    if (args.memoHash !== expected) {
+      throw new PolicyViolation('IntentMismatch: memo does not describe this payment');
+    }
     if (new Date(args.expiresAt).getTime() < now.getTime()) {
       throw new PolicyViolation('PolicyViolation: intent expired');
     }

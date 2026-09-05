@@ -1,5 +1,5 @@
 import { appendEvent, persist, readAuditFile } from '@/lib/audit';
-import { assetNetworkFor, currentChainMode } from '@/lib/intent';
+import { assetNetworkFor, currentChainMode, intentHashParts } from '@/lib/intent';
 import { decide, type PolicyContext } from '@/lib/policy';
 import { state } from '@/lib/store';
 import { PolicyViolation, type WalletAdapter } from '@/lib/wallet';
@@ -92,6 +92,7 @@ export async function executeIntent(input: ExecuteInput): Promise<ExecuteResult>
           payee: payment.payee,
           amount: payment.amount,
           memoHash: payment.memoHash,
+          ...intentHashParts(intent),
           expiresAt: intent.expiresAt,
         },
         now,
@@ -229,6 +230,7 @@ export async function approvePayment(
         payee: payment.payee,
         amount: payment.amount,
         memoHash: payment.memoHash,
+        ...intentHashParts(args.intent),
         expiresAt: args.intent.expiresAt,
         approved: true,
       },

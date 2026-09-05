@@ -1,3 +1,4 @@
+import { keccak256, toBytes } from 'viem';
 import { describe, expect, it } from 'vitest';
 import {
   assetNetworkFor,
@@ -5,6 +6,7 @@ import {
   buildIntent,
   deriveTaskId,
   intentExpiry,
+  intentHash,
   intentToTransaction,
   isIntentExpired,
   INTENT_TTL_MS,
@@ -13,7 +15,7 @@ import type { Payee, Policy } from '@/lib/types';
 
 const base = {
   taskId: 'bill-2026-09-taipower',
-  merchant: '台灣電力公司',
+  payee: `0x${'a'.repeat(40)}` as `0x${string}`,
   amount: 1280,
   assetNetwork: 'tTWD@eip155:31337',
 };
@@ -32,9 +34,32 @@ describe('buildIdempotencyKey', () => {
   });
 
   it('收款人不同就是不同的鍵', () => {
-    expect(buildIdempotencyKey({ ...base, merchant: '詐騙帳戶' })).not.toBe(
+    expect(buildIdempotencyKey({ ...base, payee: `0x${'b'.repeat(40)}` })).not.toBe(
       buildIdempotencyKey(base),
     );
+  });
+
+  /**
+   * 9/5 改的：鍵裡放的是**收款地址**，不是商家名字。
+   *
+   * 名字不規範（「台電」與「台灣電力公司」是同一個收款人），而且要讓合約重算
+   * 就得把中文字串丟進 calldata。地址本來就是 pay() 的參數，也才是錢真正去的地方。
+   */
+  it('跟合約算出來的是同一個值 —— 這是 IntentMismatch 不會誤觸的前提', () => {
+    // GuardedWallet.intentHash: keccak256(abi.encode(taskIdHash, payee, amount, assetNetworkHash))
+    const viaParts = intentHash({
+      taskIdHash: keccak256(toBytes(base.taskId)),
+      payee: base.payee,
+      amount: base.amount,
+      assetNetworkHash: keccak256(toBytes(base.assetNetwork)),
+    });
+    expect(viaParts).toBe(buildIdempotencyKey(base));
+  });
+
+  it('欄位邊界不會被串在一起搞混（abi.encode 每格固定 32 bytes）', () => {
+    const a = buildIdempotencyKey({ ...base, taskId: 'ab', assetNetwork: 'c' });
+    const b = buildIdempotencyKey({ ...base, taskId: 'a', assetNetwork: 'bc' });
+    expect(a).not.toBe(b);
   });
 
   it('換一條鏈就是不同的鍵，同一份授權不能跨鏈再結算一次', () => {

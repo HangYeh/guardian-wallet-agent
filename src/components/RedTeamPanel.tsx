@@ -1,7 +1,8 @@
 'use client';
 
 import { useState, useTransition } from 'react';
-import { runAttack, type Attack, type RedTeamResult } from '@/app/wallet/actions';
+import { runAttack, type RedTeamResult } from '@/app/wallet/actions';
+import type { Attack } from '@/lib/redteam';
 
 /**
  * 紅隊按鈕。
@@ -18,6 +19,11 @@ const ATTACKS: { id: Attack; label: string; line: string }[] = [
   { id: 'over_cap', label: '超過單筆上限', line: '一次付出遠超過上限的金額' },
   { id: 'replay', label: '重放已付的款', line: '把剛剛成功的那筆再送一次' },
   { id: 'expired', label: '用過期的授權', line: '拿一份過期的授權去付款' },
+  {
+    id: 'forged_memo',
+    label: '在紀錄上寫成另一筆',
+    line: '付 100 元，但送一把描述「1 元」的授權編號',
+  },
 ];
 
 export default function RedTeamPanel({ enabled }: { enabled: boolean }) {

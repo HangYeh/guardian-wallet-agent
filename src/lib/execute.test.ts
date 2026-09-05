@@ -43,9 +43,19 @@ const TAIPOWER: Payee = {
   allowlisted: true,
 };
 
+const IMPOSTOR = '0x976EA74026E726554dB657fA54763abd0C3a0aa9' as const;
+
 const NOW = new Date('2026-09-04T06:00:00.000Z');
 
-function intentFor(over: Partial<ParsedFields> = {}, payee?: Payee) {
+/**
+ * 造一份意圖。
+ *
+ * `payee` 預設是 TAIPOWER，**而且一定要跟等一下 `executeIntent` 收到的那個一樣** ——
+ * 冪等鍵綁的是收款地址，兩邊給不同的收款人會撞上 IntentMismatch。
+ * 正式管線用的是同一個變數（`api/intake/route.ts` 的 `payee`），
+ * 這裡刻意讓預設值一致，免得測試用一個現實中不存在的組合。
+ */
+function intentFor(over: Partial<ParsedFields> = {}, payee: Payee | undefined = TAIPOWER) {
   const draft: ParsedFields = {
     kind: 'bill',
     payeeName: '台灣電力公司',
@@ -153,10 +163,31 @@ describe('執行層', () => {
     expect(v.kind).toBe('hash-mismatch');
   });
 
+  // --- 回歸測試：意圖綁定（9/5 加）---
+
+  it('意圖是對這個收款人開的，換一個人就付不出去', async () => {
+    // 冪等鍵 = keccak256(abi.encode(taskIdHash, payee, amount, assetNetworkHash))。
+    // 合約會重算一次比對，所以「拿台電那份授權去付給別人」在鏈上就回退了 ——
+    // 不是靠應用層自律，是合約算出來的雜湊對不上。
+    const intent = intentFor({ amount: 1200 }, TAIPOWER);
+    const impostor: Payee = { ...TAIPOWER, id: 'payee_fake', name: '假台電', address: IMPOSTOR };
+
+    const r = await executeIntent({
+      intent,
+      policy: { ...POLICY, allowlist: ['payee_taipower', 'payee_fake'] },
+      wallet: wallet(),
+      payee: { ...impostor, allowlisted: true },
+      now: NOW,
+    });
+
+    expect(r.payment.status).toBe('failed');
+    expect(r.payment.revertReason).toContain('IntentMismatch');
+  });
+
   // --- 回歸測試 2：沒有收款地址不可核准 ---
 
   it('名單裡對不到的收款人，付款不可核准 —— 否則錢會付到零地址', async () => {
-    const intent = intentFor({ payeeName: '好棒棒旅行社', amount: 1500 });
+    const intent = intentFor({ payeeName: '好棒棒旅行社', amount: 1500 }, undefined);
     const r = await executeIntent({
       intent,
       policy: POLICY,

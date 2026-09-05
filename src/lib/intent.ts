@@ -1,4 +1,4 @@
-import { keccak256, toBytes } from 'viem';
+import { encodeAbiParameters, keccak256, toBytes } from 'viem';
 import type {
   ChainMode,
   IntentSource,
@@ -23,11 +23,28 @@ export const INTENT_TTL_MS = 15 * 60 * 1000;
 // 冪等鍵
 // ---------------------------------------------------------------------------
 
+/** 沒有對應到已知收款人時用的地址。這種意圖永遠過不了白名單，只需要鍵是穩定的。 */
+export const NO_PAYEE = `0x${'0'.repeat(40)}` as const;
+
 /**
- * 冪等鍵 = keccak256("taskId|merchant|amount|assetNetwork")。
+ * 冪等鍵 = `keccak256(abi.encode(taskIdHash, payee, amount, assetNetworkHash))`。
  *
  * 同一把鍵在合約裡就是 memoHash，`GuardedWallet` 用 `usedIntent[memoHash]`
- * 擋掉第二次結算。
+ * 擋掉第二次結算 —— 而且**合約會自己算一遍再比對**（`GuardedWallet.intentHash`）。
+ * 這一行和那一行 Solidity 必須永遠算出同一個值，所以：
+ *
+ *   - 用 `abi.encode` 而不是字串接起來。欄位固定佔 32 bytes，
+ *     不會有「'ab'+'c' 與 'a'+'bc' 撞成同一串」的邊界問題。
+ *   - 兩邊都拿得到的東西才進來。字串先雜湊成 bytes32 再送上鏈。
+ *
+ * 兩邊若哪天走鐘，第一筆付款就會撞上 `IntentMismatch` 直接回退 ——
+ * **這正是把它做成「比對」而不是「合約自己算」的理由**：同一個公式有兩份實作，
+ * 沉默地各算各的遲早出事，不如讓它在第一次就大聲壞掉。
+ *
+ * 鍵裡放的是**收款地址**不是商家名字（9/5 改的）。名字不規範（「台電」與
+ * 「台灣電力公司」是同一個收款人），要重算就得把中文字串丟進 calldata；
+ * 而地址本來就是 `pay()` 的參數，也才是錢真正去的地方。名字其實是多餘的 ——
+ * `taskId` 裡的 slug 已經由收款人決定了。
  *
  * 刻意「不」把 expiresAt 放進來。放進去的話，逾時重試會因為新的截止時間
  * 而得到一把新的鍵，於是同一筆錢可以付第二次 —— 那正是要防的事。
@@ -38,12 +55,58 @@ export const INTENT_TTL_MS = 15 * 60 * 1000;
  */
 export function buildIdempotencyKey(args: {
   taskId: string;
-  merchant: string;
+  payee: `0x${string}`;
   amount: number;
   assetNetwork: string;
 }): `0x${string}` {
-  const canonical = `${args.taskId}|${args.merchant}|${args.amount}|${args.assetNetwork}`;
-  return keccak256(toBytes(canonical));
+  return intentHash({
+    taskIdHash: keccak256(toBytes(args.taskId)),
+    payee: args.payee,
+    amount: args.amount,
+    assetNetworkHash: keccak256(toBytes(args.assetNetwork)),
+  });
+}
+
+/**
+ * 低階版：字串已經雜湊過了。**這一個是 `GuardedWallet.intentHash()` 的逐行對照。**
+ *
+ * 拆成兩層是因為送上鏈的就是雜湊過的 bytes32，合約看不到原始字串。
+ * 錢包 adapter 與紅隊按鈕拿到的是 `PayArgs`（已經帶著雜湊），只有這一層能用；
+ * `buildIdempotencyKey` 那一層給還握著意圖原文的地方用。
+ */
+export function intentHash(args: {
+  taskIdHash: `0x${string}`;
+  payee: `0x${string}`;
+  amount: number;
+  assetNetworkHash: `0x${string}`;
+}): `0x${string}` {
+  return keccak256(
+    encodeAbiParameters(
+      [{ type: 'bytes32' }, { type: 'address' }, { type: 'uint256' }, { type: 'bytes32' }],
+      [
+        args.taskIdHash,
+        args.payee,
+        BigInt(Math.max(0, Math.round(args.amount))),
+        args.assetNetworkHash,
+      ],
+    ),
+  );
+}
+
+/**
+ * 合約重算 memoHash 要的兩個雜湊。跟著付款一起送上鏈。
+ *
+ * 拉成一個函式而不是讓每個呼叫端各自 `keccak256(toBytes(...))`，
+ * 是因為漏掉哪一邊都會變成 `IntentMismatch`，而那時要找是誰算錯很痛苦。
+ */
+export function intentHashParts(intent: Pick<PaymentIntent, 'taskId' | 'assetNetwork'>): {
+  taskIdHash: `0x${string}`;
+  assetNetworkHash: `0x${string}`;
+} {
+  return {
+    taskIdHash: keccak256(toBytes(intent.taskId)),
+    assetNetworkHash: keccak256(toBytes(intent.assetNetwork)),
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -160,7 +223,12 @@ export function buildIntent(args: {
       rawText: args.rawText,
     });
 
-  const idempotencyKey = buildIdempotencyKey({ taskId, merchant, amount, assetNetwork });
+  const idempotencyKey = buildIdempotencyKey({
+    taskId,
+    payee: args.payee?.address ?? NO_PAYEE,
+    amount,
+    assetNetwork,
+  });
 
   return {
     id: `int_${idempotencyKey.slice(2, 10)}`,

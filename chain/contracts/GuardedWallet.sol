@@ -16,8 +16,27 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
  *   operator  門神 agent。只能在政策範圍內付款，其餘一律回退。
  *   本合約餘額  受限的代理資金。額度用完就是用完，不會波及其他帳戶。
  *
- * 每一筆付款都綁一個 memoHash，就是鏈下 PaymentIntent 的冪等鍵
- * keccak256("taskId|merchant|amount|assetNetwork")。
+ * 每一筆付款都綁一個 memoHash，就是鏈下 PaymentIntent 的冪等鍵：
+ *
+ *     memoHash = keccak256(abi.encode(taskIdHash, payee, amount, assetNetworkHash))
+ *
+ * **而且合約會自己算一遍再比對**（`intentHash`）。這一條 require 是 9/5 補上的，
+ * 在那之前 memoHash 只是一把不透明的去重鍵：合約收到就寫進 usedIntent，
+ * 從不檢查它是否真的對應這次的收款人與金額 —— 所以
+ * `pay(小宇, 3000, 台電那筆的 memoHash)` 會被照付，鏈上留下一筆
+ * 對不起來的紀錄，而合約不會察覺。
+ *
+ * 補上之後能講的是：拿到 operator 金鑰的人，在額度內還是能偷錢
+ * （六道 require 擋的是金額，不是身分），但他**沒辦法讓鏈上的紀錄說謊** ——
+ * 每一個 PaymentExecuted 事件裡的 memoHash 都可證明地描述了它自己那筆付款。
+ * 對應演講 Slide 26：Signatures must bind to one task and purchase。
+ *
+ * `intentHash` 開成 public pure，任何人都能拿稽核檔裡的四個欄位自己算一次，
+ * 跟鏈上事件比對。稽核紀錄因此是可驗證的，不是「我們說了算」。
+ *
+ * 雜湊的輸入用**收款地址**而不是商家名字。名字不規範（「台電」與
+ * 「台灣電力公司」是同一個收款人），而且要丟進 calldata 才算得動；
+ * 地址本來就是 pay() 的參數，而且它才是錢真正去的地方。
  *
  * 注意 **`expiresAt` 刻意不在那個雜湊裡**：逾時重試必須拿到同一把鍵，
  * 否則「等太久所以重送」就會變成第二次付款。效期改成獨立的參數，
@@ -42,7 +61,7 @@ contract GuardedWallet {
     /// @notice 允許自動付款的收款人。不在名單上的一律要核准。
     mapping(address => bool) public allowlist;
 
-    /// @notice 每日已花金額，鍵是 block.timestamp / 1 days。
+    /// @notice 每日已花金額，鍵是 `dayIndex(block.timestamp)`（台北日，不是 UTC 日）。
     mapping(uint256 => uint256) public spentByDay;
 
     /// @notice 已結算或已被拒絕的意圖。防重放與冪等都靠這一個對照表。
@@ -117,6 +136,54 @@ contract GuardedWallet {
         emit OperatorRotated(address(0), _operator);
     }
 
+    // ─── 日界線 ───────────────────────────────────────────────────────────
+
+    /**
+     * @notice 單日上限的時區位移。台北是 UTC+8。
+     *
+     * @dev 沒有這個位移的話，`block.timestamp / 1 days` 的日界線落在 UTC 午夜，
+     *      也就是**台北的早上八點** —— 家人設「單日上限 5,000」，實際生效的窗口
+     *      卻是早上八點到隔天早上八點。而鏈下的安靜時段（22–7）用的是台北時間，
+     *      同一份政策裡兩種「一天」。
+     *
+     *      固定 +8 而不是處理真正的時區資料庫：台灣沒有日光節約時間，
+     *      而把 tzdata 搬進合約是荒謬的。這個作品的使用者在台灣。
+     */
+    uint256 private constant TZ_OFFSET = 8 hours;
+
+    /**
+     * @notice 某個時間戳落在哪一個「台北日」。`spentByDay` 的鍵。
+     *
+     * @dev 開成 public pure 的理由跟 `intentHash` 一樣：鏈下的 `dayIndex()`
+     *      要算出同一個數字才讀得到正確的桶，有個權威定義可以對照。
+     */
+    function dayIndex(uint256 ts) public pure returns (uint256) {
+        return (ts + TZ_OFFSET) / 1 days;
+    }
+
+    // ─── 意圖雜湊 ─────────────────────────────────────────────────────────
+
+    /**
+     * @notice 由付款內容算出 memoHash。鏈下的 `buildIdempotencyKey()` 算的是同一個東西。
+     *
+     * @dev 開成 public pure 是刻意的：評審拿稽核檔裡的
+     *      (taskId, 收款地址, 金額, assetNetwork) 就能自己算一次，跟鏈上事件比對。
+     *      沒有這一個進入點，「稽核可驗證」就只是我們自己的說法。
+     *
+     *      字串先在鏈下雜湊成 bytes32 再送進來 —— 中文商家名與 CAIP-2 字串
+     *      丟進 calldata 又貴又難規範。用 abi.encode 而不是 encodePacked：
+     *      每個欄位固定佔 32 bytes，不會出現「兩組不同輸入接出同一串」的邊界問題。
+     *
+     *      **expiresAt 不在裡面**，理由見檔頭。
+     */
+    function intentHash(address payee, uint256 amount, bytes32 taskIdHash, bytes32 assetNetworkHash)
+        public
+        pure
+        returns (bytes32)
+    {
+        return keccak256(abi.encode(taskIdHash, payee, amount, assetNetworkHash));
+    }
+
     // ─── 付款 ────────────────────────────────────────────────────────────
 
     /**
@@ -130,17 +197,25 @@ contract GuardedWallet {
      *      這樣就算代幣合約在 transfer 裡回頭呼叫 pay，第二次也會撞上
      *      usedIntent 而回退 —— 重入拿不到第二筆錢。
      */
-    function pay(address payee, uint256 amount, bytes32 memoHash, uint256 expiresAt)
-        external
-        onlyOperator
-    {
+    function pay(
+        address payee,
+        uint256 amount,
+        bytes32 memoHash,
+        bytes32 taskIdHash,
+        bytes32 assetNetworkHash,
+        uint256 expiresAt
+    ) external onlyOperator {
+        require(
+            memoHash == intentHash(payee, amount, taskIdHash, assetNetworkHash),
+            "IntentMismatch: memo does not describe this payment"
+        );
         require(block.timestamp <= expiresAt, "PolicyViolation: intent expired");
         require(!usedIntent[memoHash], "Replay: intent already settled");
         require(allowlist[payee], "PolicyViolation: payee not allowlisted");
         require(amount <= policy.perTxCap, "PolicyViolation: per-tx cap exceeded");
         require(amount <= policy.approvalThreshold, "PolicyViolation: guardian approval required");
 
-        uint256 day = block.timestamp / 1 days;
+        uint256 day = dayIndex(block.timestamp);
         require(spentByDay[day] + amount <= policy.dailyCap, "PolicyViolation: daily cap exceeded");
 
         usedIntent[memoHash] = true;
@@ -161,9 +236,15 @@ contract GuardedWallet {
         address payee,
         uint256 amount,
         bytes32 memoHash,
+        bytes32 taskIdHash,
+        bytes32 assetNetworkHash,
         uint256 expiresAt,
         string calldata reason
     ) external onlyOperator returns (uint256 proposalId) {
+        require(
+            memoHash == intentHash(payee, amount, taskIdHash, assetNetworkHash),
+            "IntentMismatch: memo does not describe this payment"
+        );
         require(payee != address(0), "payee is zero address");
         require(amount > 0, "amount is zero");
         require(block.timestamp <= expiresAt, "PolicyViolation: intent expired");
@@ -207,7 +288,7 @@ contract GuardedWallet {
         require(!usedIntent[p.memoHash], "Replay: intent already settled");
         require(p.amount <= policy.perTxCap, "PolicyViolation: per-tx cap exceeded");
 
-        uint256 day = block.timestamp / 1 days;
+        uint256 day = dayIndex(block.timestamp);
         require(
             spentByDay[day] + p.amount <= policy.dailyCap, "PolicyViolation: daily cap exceeded"
         );
@@ -277,7 +358,7 @@ contract GuardedWallet {
 
     /// @notice 今天還剩多少額度。UI 直接顯示這個數字給守護者看。
     function remainingToday() external view returns (uint256) {
-        uint256 spent = spentByDay[block.timestamp / 1 days];
+        uint256 spent = spentByDay[dayIndex(block.timestamp)];
         return spent >= policy.dailyCap ? 0 : policy.dailyCap - spent;
     }
 }

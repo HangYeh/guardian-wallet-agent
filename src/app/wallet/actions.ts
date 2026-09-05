@@ -4,9 +4,9 @@ import { revalidatePath } from 'next/cache';
 import { loadDemo } from '@/lib/demo';
 import { write } from '@/lib/execute';
 import { assetNetworkFor, currentChainMode } from '@/lib/intent';
+import { ATTACKS, buildAttack, type Attack } from '@/lib/redteam';
 import { effectivePolicy } from '@/lib/store';
 import { PolicyViolation, walletFor } from '@/lib/wallet';
-import type { Payee } from '@/lib/types';
 
 /**
  * 紅隊按鈕。
@@ -26,15 +26,9 @@ import type { Payee } from '@/lib/types';
  * 不能因為它長在自己站上就少一道守衛 —— 能開這一頁的人就打得到這個 action。
  */
 
-export type Attack = 'not_allowlisted' | 'over_cap' | 'replay' | 'expired';
-
-// 不匯出：'use server' 的檔案只能匯出 async 函式。畫面自己有一份給人看的標籤。
-const ATTACKS: Record<Attack, string> = {
-  not_allowlisted: '把錢付給名單外的陌生帳戶',
-  over_cap: '一次付出遠超過單筆上限的金額',
-  replay: '把剛剛成功的那筆重送一次',
-  expired: '拿一份已經過期的授權去付款',
-};
+// 攻擊清單與參數組裝都在 `@/lib/redteam`，跟 /api/redteam 共用同一份。
+// 'use server' 的檔案只能匯出 async 函式，所以型別與標籤都從那裡 re-export 不了 ——
+// 畫面直接 import `@/lib/redteam` 拿標籤。
 
 export type RedTeamResult =
   | { ok: false; error: string }
@@ -63,34 +57,9 @@ export async function runAttack(attack: Attack): Promise<RedTeamResult> {
   const wallet = walletFor(policy);
   const now = new Date();
 
-  const allowlisted = demo.payees.find((p) => p.allowlisted);
-  if (!allowlisted) return { ok: false, error: '劇本裡沒有白名單收款人，無法演示' };
-
-  // 優先挑劇本裡的詐騙帳戶：舞台上「付給 (999) 1234-5678-9012」比
-  // 「付給銀髮健身課程」有說服力得多。
-  const stranger: Payee =
-    demo.payees.find((p) => p.kind === 'unknown') ??
-    demo.payees.find((p) => !p.allowlisted) ??
-    ({ ...allowlisted, id: 'stranger', allowlisted: false } as Payee);
-
-  const future = new Date(now.getTime() + 10 * 60_000).toISOString();
-  const past = new Date(now.getTime() - 60_000).toISOString();
-
-  // 每次用不同的鍵，否則第二次按下去演到的會是防重放，而不是原本要演的那一條
-  const fresh = (): `0x${string}` =>
-    `0x${Date.now().toString(16).padStart(16, '0')}${Math.random().toString(16).slice(2).padEnd(48, '0')}`.slice(
-      0,
-      66,
-    ) as `0x${string}`;
-
-  const plan: Record<Attack, { payee: Payee; amount: number; memoHash: `0x${string}`; expiresAt: string }> = {
-    not_allowlisted: { payee: stranger, amount: 500, memoHash: fresh(), expiresAt: future },
-    over_cap: { payee: allowlisted, amount: policy.perTxCap * 20, memoHash: fresh(), expiresAt: future },
-    replay: { payee: allowlisted, amount: 100, memoHash: fresh(), expiresAt: future },
-    expired: { payee: allowlisted, amount: 100, memoHash: fresh(), expiresAt: past },
-  };
-
-  const args = plan[attack];
+  const built = buildAttack(attack, { demo, policy, now });
+  if ('error' in built) return { ok: false, error: built.error };
+  const { args } = built;
   const attempted = { payee: args.payee.name, address: args.payee.address, amount: args.amount };
 
   // 重放要先成功付一次，才有東西可以重放

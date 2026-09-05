@@ -10,7 +10,7 @@ import {
   type WalletClient,
 } from 'viem';
 import { mnemonicToAccount, privateKeyToAccount } from 'viem/accounts';
-import { PolicyViolation, type PayArgs, type PayReceipt, type WalletAdapter } from '@/lib/wallet';
+import { PolicyViolation, dayIndex, type PayArgs, type PayReceipt, type WalletAdapter } from '@/lib/wallet';
 import type { ChainMode } from '@/lib/types';
 
 /**
@@ -59,6 +59,8 @@ const WALLET_ABI = [
       { name: 'payee', type: 'address' },
       { name: 'amount', type: 'uint256' },
       { name: 'memoHash', type: 'bytes32' },
+      { name: 'taskIdHash', type: 'bytes32' },
+      { name: 'assetNetworkHash', type: 'bytes32' },
       { name: 'expiresAt', type: 'uint256' },
     ],
     outputs: [],
@@ -71,6 +73,8 @@ const WALLET_ABI = [
       { name: 'payee', type: 'address' },
       { name: 'amount', type: 'uint256' },
       { name: 'memoHash', type: 'bytes32' },
+      { name: 'taskIdHash', type: 'bytes32' },
+      { name: 'assetNetworkHash', type: 'bytes32' },
       { name: 'expiresAt', type: 'uint256' },
       { name: 'reason', type: 'string' },
     ],
@@ -181,11 +185,6 @@ function operatorAccount(mode: ChainMode) {
   return mnemonicToAccount(HARDHAT_MNEMONIC, { addressIndex: 1 });
 }
 
-/** 合約用的日索引：`block.timestamp / 1 days`。鏈上鏈下要算出同一個「今天」。 */
-function dayIndex(now: Date): bigint {
-  return BigInt(Math.floor(now.getTime() / 86_400_000));
-}
-
 /**
  * 把 viem 的錯誤壓成合約的那句 revert 訊息。
  *
@@ -237,7 +236,7 @@ export class ChainWallet implements WalletAdapter {
   }
 
   async spentToday(now: Date = new Date()): Promise<number> {
-    return Number(await this.read<bigint>('spentByDay', [dayIndex(now)]));
+    return Number(await this.read<bigint>('spentByDay', [BigInt(dayIndex(now))]));
   }
 
   async isSettled(memoHash: `0x${string}`): Promise<boolean> {
@@ -265,6 +264,8 @@ export class ChainWallet implements WalletAdapter {
           args.payee.address,
           BigInt(args.amount),
           args.memoHash,
+          args.taskIdHash,
+          args.assetNetworkHash,
           BigInt(Math.floor(new Date(args.expiresAt).getTime() / 1000)),
         ],
         account,

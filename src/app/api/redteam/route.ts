@@ -4,9 +4,9 @@ import { checkGuardian } from '@/lib/guardian-auth';
 import { rateGuard } from '@/lib/rate-limit';
 import { assetNetworkFor, currentChainMode } from '@/lib/intent';
 import { loadDemo } from '@/lib/demo';
+import { ATTACKS, buildAttack, isAttack } from '@/lib/redteam';
 import { write } from '@/lib/execute';
 import { PolicyViolation, walletFor } from '@/lib/wallet';
-import type { Payee } from '@/lib/types';
 
 export const dynamic = 'force-dynamic';
 
@@ -29,14 +29,6 @@ export const dynamic = 'force-dynamic';
  * 而「誰能讓我們的金鑰簽東西」這件事不該只由一個環境變數決定。
  */
 
-type Attack = 'not_allowlisted' | 'over_cap' | 'replay' | 'expired';
-
-const ATTACKS: Record<Attack, string> = {
-  not_allowlisted: '把錢付給名單外的陌生帳戶',
-  over_cap: '一次付出遠超過單筆上限的金額',
-  replay: '把剛剛成功的那筆重送一次',
-  expired: '拿一份已經過期的授權去付款',
-};
 
 function enabled(): boolean {
   return process.env.ENABLE_REDTEAM === 'true';
@@ -71,15 +63,15 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: false, error: guard.error }, { status: guard.status });
   }
 
-  let body: { attack?: Attack };
+  let body: { attack?: unknown };
   try {
-    body = (await request.json()) as { attack?: Attack };
+    body = (await request.json()) as { attack?: unknown };
   } catch {
     return NextResponse.json({ ok: false, error: 'body 不是合法的 JSON' }, { status: 400 });
   }
 
   const attack = body.attack;
-  if (!attack || !(attack in ATTACKS)) {
+  if (!isAttack(attack)) {
     return NextResponse.json(
       { ok: false, error: `attack 要是 ${Object.keys(ATTACKS).join(' / ')} 其中一個` },
       { status: 400 },
@@ -91,32 +83,11 @@ export async function POST(request: Request) {
   const wallet = walletFor(policy);
   const now = new Date();
 
-  const allowlisted = demo.payees.find((p) => p.allowlisted)!;
-  // 優先挑劇本裡的詐騙帳戶：舞台上「付給 (999) 1234-5678-9012」比
-  // 「付給銀髮健身課程」有說服力得多。
-  const stranger: Payee =
-    demo.payees.find((p) => p.kind === 'unknown') ??
-    demo.payees.find((p) => !p.allowlisted) ??
-    ({ ...allowlisted, id: 'stranger', allowlisted: false } as Payee);
-
-  const future = new Date(now.getTime() + 10 * 60_000).toISOString();
-  const past = new Date(now.getTime() - 60_000).toISOString();
-
-  // 每次用不同的鍵，才不會第二次按下去變成防重放而不是原本要演的那一條
-  const fresh = (): `0x${string}` =>
-    `0x${Date.now().toString(16).padStart(16, '0')}${Math.random().toString(16).slice(2).padEnd(48, '0')}`.slice(
-      0,
-      66,
-    ) as `0x${string}`;
-
-  const plan: Record<Attack, { payee: Payee; amount: number; memoHash: `0x${string}`; expiresAt: string }> = {
-    not_allowlisted: { payee: stranger, amount: 500, memoHash: fresh(), expiresAt: future },
-    over_cap: { payee: allowlisted, amount: policy.perTxCap * 20, memoHash: fresh(), expiresAt: future },
-    replay: { payee: allowlisted, amount: 100, memoHash: fresh(), expiresAt: future },
-    expired: { payee: allowlisted, amount: 100, memoHash: fresh(), expiresAt: past },
-  };
-
-  const args = plan[attack];
+  const built = buildAttack(attack, { demo, policy, now });
+  if ('error' in built) {
+    return NextResponse.json({ ok: false, error: built.error }, { status: 500 });
+  }
+  const { args } = built;
 
   // 重放這一條要先成功付一次，才有東西可以重放
   let setup: string | undefined;
