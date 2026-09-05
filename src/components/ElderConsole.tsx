@@ -296,7 +296,7 @@ export default function ElderConsole() {
             disabled={busy}
             onChange={(e) => setText(e.target.value)}
             placeholder="例如：【健保署通知】您的健保卡涉及詐領⋯⋯"
-            className="mt-2 w-full resize-y border border-[var(--color-line)] bg-[var(--color-surface)] p-3 text-[1rem] leading-relaxed"
+            className="mt-2 w-full resize-y rounded-[14px] border border-[var(--color-line)] bg-[var(--color-surface)] p-3 text-[1rem] leading-relaxed outline-none focus:border-[var(--color-mint-deep)]"
           />
           <div className="mt-3 flex flex-wrap items-center gap-2">
             <button
@@ -346,7 +346,7 @@ export default function ElderConsole() {
       </div>
 
       {result && !result.ok && (
-        <div className="card mt-4 border-l-4 border-l-[var(--color-cinnabar)] p-4">
+        <div className="card verdict mt-4 p-4" style={{ borderTopColor: 'var(--color-cinnabar)' }}>
           <div className="label" style={{ color: 'var(--color-cinnabar)' }}>讀不到</div>
           <p className="mt-1 text-[0.9rem]">{result.error}</p>
         </div>
@@ -393,8 +393,8 @@ export default function ElderConsole() {
               </div>
 
               <div className="mt-2 flex flex-wrap items-baseline gap-x-4 gap-y-1">
-                <span className="text-[1.6rem] font-bold">{f.payeeName}</span>
-                <span className="mono text-[2rem] font-bold">
+                <span className="text-[1.6rem] font-extrabold">{f.payeeName}</span>
+                <span className="mono text-[2rem] font-bold text-[var(--color-mint-shadow)]">
                   {f.amount.toLocaleString('zh-TW')}
                   <span className="ml-1 text-[1rem] font-normal text-[var(--color-ink-2)]">元</span>
                 </span>
@@ -430,27 +430,37 @@ export default function ElderConsole() {
                 上面六個欄位是模型讀出來的，下面六個是政策引擎封上去的。
                 模型碰不到這六個，所以就算它被帳單上的文字騙過去，也改不了能付多少。
               </p>
-              <div className="mt-3 grid gap-x-6 gap-y-2 text-[0.85rem] sm:grid-cols-2">
-                <Field label="任務" value={i.taskId} mono />
-                <Field label="標的" value={i.resource} />
-                <Field label="收款方" value={i.merchant} />
-                <Field
-                  label="授權上限"
-                  value={`${i.maxAmount.toLocaleString('zh-TW')} 元`}
-                  mono
-                  accent={i.amount > i.maxAmount ? 'var(--color-cinnabar)' : undefined}
+              {/* 終端機的樣子不是裝飾：這六欄是程式封的，跟上面模型讀的那張卡要一眼分得出來 */}
+              <div className="cli-block mt-3">
+                <div className="cli-head">
+                  <span className="traffic" aria-hidden="true">
+                    <span />
+                    <span />
+                    <span />
+                  </span>
+                  <span className="dim">guardian seal --intent {i.id}</span>
+                </div>
+                <Sealed k="taskId" v={i.taskId} />
+                <Sealed k="resource" v={i.resource} />
+                <Sealed k="merchant" v={i.merchant} />
+                <Sealed
+                  k="maxAmount"
+                  v={`${i.maxAmount.toLocaleString('zh-TW')} TWD`}
+                  warn={i.amount > i.maxAmount}
+                  note={i.amount > i.maxAmount ? `# 要求 ${i.amount.toLocaleString('zh-TW')}，壓到單筆上限` : undefined}
                 />
-                <Field label="資產與網路" value={i.assetNetwork} mono />
-                <Field label="效期至" value={i.expiresAt.slice(11, 19) + ' UTC'} mono />
-              </div>
-              <div className="mt-3">
-                <Field label="冪等鍵（鏈上的 memoHash）" value={i.idempotencyKey} mono wrap />
+                <Sealed k="assetNetwork" v={i.assetNetwork} />
+                <Sealed k="expiresAt" v={`${i.expiresAt.slice(11, 19)} UTC`} />
+                <Sealed k="memoHash" v={i.idempotencyKey} wrap />
+                <span className="line">
+                  <span className="ok">✓ sealed by policy</span> <span className="dim"># model has no write access</span>
+                </span>
               </div>
             </div>
 
             {/* ---- 警告 ---- */}
             {result.warnings && result.warnings.length > 0 && (
-              <div className="card border-l-4 border-l-[var(--color-ochre)] p-4">
+              <div className="card verdict p-4" style={{ borderTopColor: 'var(--color-ochre)' }}>
                 <div className="label" style={{ color: 'var(--color-ochre)' }}>要注意</div>
                 <ul className="mt-1 flex list-disc flex-col gap-1 pl-5 text-[0.85rem]">
                   {result.warnings.map((w) => (
@@ -526,14 +536,11 @@ function BigKey({
       type="button"
       disabled={pending || disabled}
       onClick={onClick}
-      className={`card flex flex-col items-start gap-1 p-5 text-left ${
-        pending ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'
-      }`}
-      style={active ? { borderColor: 'var(--color-cinnabar)', borderWidth: 2 } : undefined}
+      className={`keycard ${active ? 'is-active' : ''} ${pending ? 'cursor-not-allowed opacity-60' : ''}`}
     >
-      <span className="text-3xl" aria-hidden="true">{icon}</span>
-      <span className="text-[1.35rem] font-bold leading-snug">{label}</span>
-      <span className="text-[0.85rem] text-[var(--color-ink-2)]">{hint}</span>
+      <span className="keycard-icon" aria-hidden="true">{icon}</span>
+      <span className="keycard-title">{label}</span>
+      <span className="keycard-hint">{hint}</span>
       {cell && <span className="pill mt-2 text-[var(--color-ink-3)]">{cell} 接上</span>}
     </button>
   );
@@ -564,18 +571,14 @@ function Verdict({
 
   return (
     <div
-      className={`card ${big ? 'mt-4 p-7' : 'p-5'}`}
-      style={{ borderLeft: `6px solid ${look.color}`, background: big ? look.bg : undefined }}
+      className={`card verdict ${big ? 'mt-4 p-7' : 'p-5'}`}
+      style={{ borderTopColor: look.color, background: big ? look.bg : undefined }}
     >
-      <div className="flex items-baseline gap-3">
-        <span
-          className={big ? 'text-[3rem] leading-none' : 'text-[2rem] leading-none'}
-          style={{ color: look.color }}
-          aria-hidden="true"
-        >
+      <div className="flex items-center gap-4">
+        <span className={`verdict-icon ${big ? 'big' : ''}`} style={{ background: look.color }} aria-hidden="true">
           {look.icon}
         </span>
-        <span className={big ? 'text-[2.4rem] font-bold leading-tight' : 'text-[1.6rem] font-bold'}>
+        <span className={big ? 'text-[2.3rem] font-extrabold leading-tight' : 'text-[1.55rem] font-extrabold leading-tight'}>
           {look.title}
         </span>
       </div>
@@ -709,6 +712,16 @@ function Reasons({ risk, big }: { risk: Risk; big?: boolean }) {
         </div>
       )}
     </div>
+  );
+}
+
+/** 授權信封裡的一行：`$ key = value`，警告值用暖橘。 */
+function Sealed({ k, v, wrap, warn, note }: { k: string; v: string; wrap?: boolean; warn?: boolean; note?: string }) {
+  return (
+    <span className={`line ${wrap ? 'wrap' : ''}`}>
+      <span className="prompt">$</span> <span className="key">{k}</span> = <span className={warn ? 'warn' : undefined}>{v}</span>
+      {note && <span className="dim"> {note}</span>}
+    </span>
   );
 }
 

@@ -67,36 +67,35 @@ export default function DemoBar() {
   const encores = SCENES.filter((s) => s.encore);
 
   return (
-    <div className="fixed inset-x-0 bottom-0 z-50 border-t border-[var(--color-line)] bg-[var(--color-surface)]">
-      <div className="mx-auto flex max-w-[1080px] flex-wrap items-center gap-2 px-[clamp(1rem,4vw,2.5rem)] py-2.5">
+    <div className="demobar">
+      <div className="demobar-inner">
         <span className="label mr-1">劇本</span>
-        {acts.map((s) => (
-          <SceneButton key={s.id} scene={s} active={lastScene === s.id} onClick={() => play(s)} />
-        ))}
+        <div className="scene-group">
+          {acts.map((s) => (
+            <SceneButton key={s.id} scene={s} active={lastScene === s.id} onClick={() => play(s)} />
+          ))}
+        </div>
 
         <span className="label ml-2 mr-1">加演</span>
-        {encores.map((s) => (
-          <SceneButton key={s.id} scene={s} active={lastScene === s.id} onClick={() => play(s)} />
-        ))}
+        <div className="scene-group">
+          {encores.map((s) => (
+            <SceneButton key={s.id} scene={s} active={lastScene === s.id} onClick={() => play(s)} />
+          ))}
+        </div>
 
         <Link
           href="/wallet#redteam"
           title="錢包頁的紅隊按鈕：跳過整條政策管線，直接拿 operator 的鑰匙打合約"
-          className="ml-2 border border-dashed border-[var(--color-cinnabar)] px-2.5 py-1 text-[0.78rem] text-[var(--color-cinnabar)] no-underline"
+          className="chip-peach ml-2"
         >
           紅隊：假設門神被騙了
         </Link>
 
         <div className="flex-1" />
 
-        {msg && <span className="text-[0.78rem] text-[var(--color-celadon)]">{msg}</span>}
+        {msg && <span className="text-[0.78rem] font-semibold text-[var(--color-mint-shadow)]">{msg}</span>}
 
-        <button
-          type="button"
-          onClick={reset}
-          disabled={busy}
-          className="border border-[var(--color-ink)] bg-[var(--color-ink)] px-3 py-1 text-[0.78rem] text-[var(--color-surface)] disabled:opacity-50"
-        >
+        <button type="button" onClick={reset} disabled={busy} className="btn-ink">
           {busy ? '重置中' : '一鍵重置'}
         </button>
       </div>
@@ -110,11 +109,7 @@ function SceneButton({ scene, active, onClick }: { scene: Scene; active: boolean
       type="button"
       onClick={onClick}
       title={`${scene.act}：${scene.label}。按了會到${scene.page === '/audit' ? '稽核頁' : '阿嬤頁'}開演`}
-      className={`border px-2.5 py-1 text-[0.78rem] ${
-        active
-          ? 'border-[var(--color-cinnabar)] text-[var(--color-cinnabar)]'
-          : 'border-[var(--color-line)] text-[var(--color-ink-2)] hover:border-[var(--color-ink)] hover:text-[var(--color-ink)]'
-      }`}
+      className={`scene-btn ${active ? 'is-active' : ''}`}
     >
       {scene.act} {scene.label}
     </button>
