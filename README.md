@@ -84,6 +84,21 @@
 
 ## 系統架構
 
+### 七張機制圖
+
+機制的重點都在「為什麼這樣設計」，文字講起來費力。最關鍵的幾個決定畫成了圖，原始檔在 `docs/figures/`，
+線上版在展示頁的[圖解區塊](https://hangyeh.github.io/guardian-wallet-agent/#figures)。
+
+| 圖 | 講什麼 | 相關章節 |
+|---|---|---|
+| [01 四層架構與信任邊界](docs/figures/fig-01-layers.png) | 每一層都假設前一層已被攻破；攻擊者能影響的範圍如何一路收斂到只剩「送什麼參數進去」 | 四層架構 · 信任邊界 |
+| [02 七步流程與兩顆模型](docs/figures/fig-02-pipeline.png) | 七步各由誰決定、失敗時往哪倒；第一步的兩顆模型並行分叉，風險分析吃的是逐字稿那一邊 | 門神管線 |
+| [03 風險地板](docs/figures/fig-03-risk-floor.png) | 同一條合成公式在兩種情境下行為相反：攻擊者讓模型閉嘴時 `max()` 拉回地板，模型看出話術時它的判斷被採用 | 核心功能 · 注入面 |
+| [04 政策收斂](docs/figures/fig-04-policy.png) | 12 條規則不是逐條短路，是全部收集、最嚴重的贏；範例是風險 low 卻照樣 hold 的孫子紅包 | 門神管線 · 政策在哪裡執行 |
+| [05 合約檢查矩陣](docs/figures/fig-05-contract-matrix.png) | `pay` / `propose` / `approve` 各檢查哪幾道，以及守護者核准唯一放寬的那兩道 | 鏈上設計 |
+| [06 稽核雜湊鏈](docs/figures/fig-06-audit-chain.png) | 改掉一筆紀錄會同時破壞它自己的 hash 與下一筆的 prevHash —— 兩個痕跡 | 稽核鏈的竄改偵測 |
+| [07 冪等鍵與重試](docs/figures/fig-07-idempotency.png) | 效期若放進雜湊，逾時重試會算出不同的鍵、變成第二筆「合法」付款 | 鏈上設計 · Replay-safe |
+
 ### 我們在 Agent 迴圈裡多插的那一層
 
 ```
@@ -96,6 +111,8 @@
 ```
 
 ### 四層架構
+
+> 圖：[四層架構與信任邊界](docs/figures/fig-01-layers.png)。下面的 mermaid 是資料流，那張圖多畫了攻擊者影響範圍的收斂。
 
 ```mermaid
 flowchart TB
@@ -138,6 +155,8 @@ flowchart TB
 
 ### 門神管線（每個輸入跑一次，七步全部留紀錄）
 
+> 圖：[七步流程與兩顆模型](docs/figures/fig-02-pipeline.png)；第 4 步見[風險地板](docs/figures/fig-03-risk-floor.png)，第 5 步見[政策收斂](docs/figures/fig-04-policy.png)。
+
 | 步 | 工具 | 做什麼 | 誰決定 |
 |---|---|---|---|
 | 1 parse | `parseText` / `parseImage` | 原文 → 七個描述性欄位；圖片另出逐字稿 | 模型（只讀） |
@@ -157,6 +176,8 @@ flowchart TB
 5. **例外走人。** hold 一定要守護者動作才會執行；block 永遠不執行，而且這一層不留「一鍵放行」的入口。
 
 ### 鏈上設計
+
+> 圖：[合約檢查矩陣](docs/figures/fig-05-contract-matrix.png)（三個函式各檢查哪幾道）、[冪等鍵與重試](docs/figures/fig-07-idempotency.png)（效期為什麼不放進雜湊）。
 
 **合約**：[`chain/contracts/GuardedWallet.sol`](chain/contracts/GuardedWallet.sol)（Solidity ^0.8.24，21 條測試）與 [`TWDStable.sol`](chain/contracts/TWDStable.sol)（ERC-20，`decimals = 0`，1 token = 1 元，畫面數字與鏈上數字一致）。
 
@@ -370,6 +391,8 @@ npm run scan:secrets    # 掃工作目錄與 git 全歷史有沒有金鑰
 ![錢包頁與紅隊按鈕（Hardhat 本地鏈）](docs/screenshots/07-wallet-local.png)
 
 ### 稽核鏈的竄改偵測
+
+> 圖：[稽核雜湊鏈](docs/figures/fig-06-audit-chain.png)，畫出改一筆會留下的兩個痕跡。
 
 稽核檔是 `data/audit.jsonl`，每行一筆 JSON、每筆帶前一筆的 hash。用編輯器改動裡面任何一筆（例如把金額改掉），重新整理稽核頁，它會指出「斷在第幾筆」。鏈上 `PaymentExecuted` 事件的 `memoHash` 與稽核事件一一對應，拿稽核檔裡的四個欄位呼叫合約的 `intentHash()` 就能自己驗。
 

@@ -340,15 +340,15 @@
       </figure>
 
       <figure class="fig">
-        <a href="figures/fig-07-idempotency.png" target="_blank" rel="noopener"><img src="figures/fig-07-idempotency.png" alt="冪等鍵為什麼不含效期" width="1160" height="670" loading="lazy"></a>
-        <div class="cap"><span class="n">Figure 06 · Idempotency</span><b>冪等鍵為什麼不含效期</b>
-          <span>效期放進雜湊的話，逾時重試會算出不同的鍵，變成第二筆「合法」付款。門神的四個欄位重試時都不變，撞上 <code>usedIntent</code> 被擋。逾時代表「結果未知」，不代表「可以再付一次」。</span></div>
+        <a href="figures/fig-06-audit-chain.png" target="_blank" rel="noopener"><img src="figures/fig-06-audit-chain.png" alt="稽核雜湊鏈與竄改痕跡" width="1200" height="533" loading="lazy"></a>
+        <div class="cap"><span class="n">Figure 06 · Audit</span><b>改一筆紀錄會留下兩個痕跡</b>
+          <span>每筆把前一筆的雜湊包進自己的雜湊。改掉第 3 筆之後，它自己的 hash 對不上、第 4 筆接的 prevHash 也對不上。這不是防竄改，是讓竄改一定被看見。</span></div>
       </figure>
 
       <figure class="fig">
-        <a href="figures/fig-06-audit-chain.png" target="_blank" rel="noopener"><img src="figures/fig-06-audit-chain.png" alt="稽核雜湊鏈與竄改痕跡" width="1200" height="533" loading="lazy"></a>
-        <div class="cap"><span class="n">Figure 07 · Audit</span><b>改一筆紀錄會留下兩個痕跡</b>
-          <span>每筆把前一筆的雜湊包進自己的雜湊。改掉第 3 筆之後，它自己的 hash 對不上、第 4 筆接的 prevHash 也對不上。這不是防竄改，是讓竄改一定被看見。</span></div>
+        <a href="figures/fig-07-idempotency.png" target="_blank" rel="noopener"><img src="figures/fig-07-idempotency.png" alt="冪等鍵為什麼不含效期" width="1160" height="670" loading="lazy"></a>
+        <div class="cap"><span class="n">Figure 07 · Idempotency</span><b>冪等鍵為什麼不含效期</b>
+          <span>效期放進雜湊的話，逾時重試會算出不同的鍵，變成第二筆「合法」付款。門神的四個欄位重試時都不變，撞上 <code>usedIntent</code> 被擋。逾時代表「結果未知」，不代表「可以再付一次」。</span></div>
       </figure>
 
     </div>
