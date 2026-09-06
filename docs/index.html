@@ -123,6 +123,15 @@
   figcaption { padding: .8rem 1rem 1rem; font-size: .9rem; }
   figcaption b { display: block; font-weight: 800; margin-bottom: .15rem; }
   figcaption span { color: var(--ink-soft); font-size: .86rem; }
+  .figs { display: grid; gap: 1.5rem; }
+  .fig { background: var(--paper); border: 1px solid var(--line); border-radius: var(--radius-lg); overflow: hidden; box-shadow: var(--shadow-lg); margin: 0; }
+  .fig a { display: block; line-height: 0; background: var(--mint-tint); }
+  /* 蓋掉截圖用的 figure img（16/11 裁切）：示意圖要完整顯示，比例照原圖 */
+  .fig img { display: block; width: 100%; height: auto; aspect-ratio: auto; object-fit: fill; object-position: initial; border-bottom: 0; }
+  .fig .cap { padding: .9rem 1.2rem 1.05rem; border-top: 1px solid var(--line-soft); }
+  .fig .cap .n { font-family: var(--mono); font-size: .64rem; letter-spacing: .16em; text-transform: uppercase; color: var(--mint-shadow); font-weight: 700; }
+  .fig .cap b { display: block; font-weight: 800; font-size: 1rem; margin: .18rem 0 .2rem; }
+  .fig .cap span { color: var(--ink-soft); font-size: .88rem; }
   .layers { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 1rem; }
   .layer { border-radius: var(--radius-lg); padding: 1.2rem 1.3rem; border: 1px solid var(--line); background: var(--paper); }
   .layer.l1 { border-top: 4px solid #b8d8e3; } .layer.l2 { border-top: 4px solid var(--mint-deep); } .layer.l3 { border-top: 4px solid var(--accent); } .layer.l4 { border-top: 4px solid var(--ink); }
@@ -148,6 +157,7 @@
       <a href="#test">評審怎麼測試</a>
       <a href="#acts">四幕</a>
       <a href="#arch">架構</a>
+      <a href="#figures">圖解</a>
       <a href="#security">安全</a>
       <a href="#video">影片</a>
       <a href="https://github.com/HangYeh/guardian-wallet-agent">GitHub</a>
@@ -292,7 +302,60 @@
   </div>
 </section>
 
-<section id="security">
+<section id="figures">
+  <div class="wrap">
+    <span class="cli"><span class="p">$</span> guardian explain <span class="f">--diagrams</span></span>
+    <h2>七張圖看完整個機制</h2>
+    <p class="sub">機制的重點都在「為什麼這樣設計」，文字講起來費力。這七張圖把最關鍵的幾個決定畫出來：地板分數為什麼要取 max、合約核准為什麼只放寬兩道、冪等鍵為什麼不含效期。點圖可看原尺寸。</p>
+    <div class="figs">
+
+      <figure class="fig">
+        <a href="figures/fig-01-layers.png" target="_blank" rel="noopener"><img src="figures/fig-01-layers.png" alt="四層架構與信任邊界" width="1240" height="561"></a>
+        <div class="cap"><span class="n">Figure 01 · Architecture</span><b>四層架構與信任邊界</b>
+          <span>每一層都假設前一層已經被攻破。下方漸縮的楔形是「攻擊者能影響的範圍」：從完全控制帳單原文，一路收斂到合約前只剩「送什麼參數進去」。</span></div>
+      </figure>
+
+      <figure class="fig">
+        <a href="figures/fig-02-pipeline.png" target="_blank" rel="noopener"><img src="figures/fig-02-pipeline.png" alt="七步流程與兩顆模型" width="1240" height="725" loading="lazy"></a>
+        <div class="cap"><span class="n">Figure 02 · Pipeline</span><b>一筆錢從拍照到付出去</b>
+          <span>七步，每一步標明「誰決定」與「失敗時往哪倒」—— 全部倒向不付。下方放大第一步：兩顆模型並行讀同一張圖，風險分析吃的是逐字稿那一邊，帳號一律從逐字稿重抓。</span></div>
+      </figure>
+
+      <figure class="fig">
+        <a href="figures/fig-03-risk-floor.png" target="_blank" rel="noopener"><img src="figures/fig-03-risk-floor.png" alt="風險分數的地板機制" width="1180" height="773" loading="lazy"></a>
+        <div class="cap"><span class="n">Figure 03 · Risk</span><b>規則是地板，模型只能往上推</b>
+          <span>兩個情境用同一條公式，行為剛好相反。攻擊者說服模型給 0 分時 <code>max()</code> 把分數拉回規則地板；模型看出規則沒抓到的話術時，它的判斷會被採用。被攻破的最壞結果是「沒幫上忙」，不是「幫倒忙」。</span></div>
+      </figure>
+
+      <figure class="fig">
+        <a href="figures/fig-04-policy.png" target="_blank" rel="noopener"><img src="figures/fig-04-policy.png" alt="政策決策的收斂規則" width="1200" height="851" loading="lazy"></a>
+        <div class="cap"><span class="n">Figure 04 · Policy</span><b>12 條規則怎麼收斂成一個結果</b>
+          <span>不是逐條短路，是全部收集、最嚴重的贏，理由取同級最先命中的那條。範例是幕三的孫子紅包：風險 low、話術 0 項，照樣 hold —— 「有風險」跟「要問人」是兩件事。</span></div>
+      </figure>
+
+      <figure class="fig">
+        <a href="figures/fig-05-contract-matrix.png" target="_blank" rel="noopener"><img src="figures/fig-05-contract-matrix.png" alt="合約三個函式的檢查矩陣" width="1120" height="946" loading="lazy"></a>
+        <div class="cap"><span class="n">Figure 05 · Contract</span><b>pay / propose / approve 各檢查哪幾道</b>
+          <span>家人核准只放寬白名單與核准門檻兩道 —— 那個動作本身就是對「這個收款人、這個金額」的授權。效期、防重放、單筆與單日上限一律照檢查：<b style="display:inline">家人能同意一筆付款，不能解除長期的硬上限。</b></span></div>
+      </figure>
+
+      <figure class="fig">
+        <a href="figures/fig-07-idempotency.png" target="_blank" rel="noopener"><img src="figures/fig-07-idempotency.png" alt="冪等鍵為什麼不含效期" width="1160" height="670" loading="lazy"></a>
+        <div class="cap"><span class="n">Figure 06 · Idempotency</span><b>冪等鍵為什麼不含效期</b>
+          <span>效期放進雜湊的話，逾時重試會算出不同的鍵，變成第二筆「合法」付款。門神的四個欄位重試時都不變，撞上 <code>usedIntent</code> 被擋。逾時代表「結果未知」，不代表「可以再付一次」。</span></div>
+      </figure>
+
+      <figure class="fig">
+        <a href="figures/fig-06-audit-chain.png" target="_blank" rel="noopener"><img src="figures/fig-06-audit-chain.png" alt="稽核雜湊鏈與竄改痕跡" width="1200" height="533" loading="lazy"></a>
+        <div class="cap"><span class="n">Figure 07 · Audit</span><b>改一筆紀錄會留下兩個痕跡</b>
+          <span>每筆把前一筆的雜湊包進自己的雜湊。改掉第 3 筆之後，它自己的 hash 對不上、第 4 筆接的 prevHash 也對不上。這不是防竄改，是讓竄改一定被看見。</span></div>
+      </figure>
+
+    </div>
+  </div>
+</section>
+
+<section id="security" class="alt">
   <div class="wrap">
     <span class="cli"><span class="p">$</span> guardian audit <span class="f">--contract</span> GuardedWallet.sol</span>
     <h2>合約在 pay() 裡擋的七件事</h2>
@@ -320,7 +383,7 @@
   </div>
 </section>
 
-<section id="video" class="alt">
+<section id="video">
   <div class="wrap">
     <div class="video">
       <h2>評選影片</h2>
